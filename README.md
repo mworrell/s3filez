@@ -38,11 +38,11 @@ Example
       {"content-length","0"},
       {"content-type","binary/octet-stream"}],
      []}}
-    7> s3filez:stream(Cfg, <<"https://s.greenqloud.com/mworrell-default/Documents/LICENSE">>, fun(X) -> io:format("~p~n", [X]) end).
+    7> s3filez:stream(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(X) -> io:format("~p~n", [X]) end).
     {content_type,<<"binary/octet-stream">>}
     <<"\n    Apache License\n", ...>>
     eof
-    8> s3filez:delete(Cfg, <<"https://s.greenqloud.com/mworrell-default/Documents/LICENSE">>).
+    8> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
     {ok,{{"HTTP/1.1",204,"No Content"},
      [{"cache-control","no-cache"},
       {"connection","close"},
