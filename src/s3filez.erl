@@ -21,6 +21,12 @@
 -module(s3filez).
 
 -export([
+    queue_get/3,
+    queue_put/3,
+    queue_put/4,
+    queue_delete/2,
+    queue_delete/3,
+
     get/2,
     delete/2,
     put/3,
@@ -29,22 +35,61 @@
 
 -export([
     put_body_file/1,
-    stream_loop/3
+    stream_loop/4
     ]).
 
 -define(BLOCK_SIZE, 65536).
--define(TIMEOUT, 30000).
+-define(CONNECT_TIMEOUT, 30000).    % 30s
+-define(TIMEOUT, 1800000).          % 30m
+
+-type config() :: {binary(), binary()}.
+-type url() :: binary().
+-type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
+-type put_data() :: {data, binary()} | {filename, pos_integer(), file:filename()}.
+
+
+%%% Queuing functions, starts a process and signals the ready_fun() when ready.
+
+-spec queue_get(config(), url(), ready_fun()) -> {ok, reference(), pid()}.
+
+queue_get(Config, Url, ReadyFun) ->
+    s3filez_jobs_sup:queue({get, Config, Url, ReadyFun}).
+
+-spec queue_put(config(), url(), put_data()) -> {ok, reference(), pid()}.
+
+queue_put(Config, Url, What) ->
+    queue_put(Config, Url, What, undefined).
+
+-spec queue_put(config(), url(), put_data(), ready_fun()) -> {ok, reference(), pid()}.
+
+queue_put(Config, Url, What, ReadyFun) ->
+    s3filez_jobs_sup:queue({put, Config, Url, What, ReadyFun}).
+
+-spec queue_delete(config(), url()) -> {ok, reference(), pid()}.
+
+queue_delete(Config, Url) ->
+    queue_delete(Config, Url, undefined).
+
+-spec queue_delete(config(), url(), ready_fun()) -> {ok, reference(), pid()}.
+
+queue_delete(Config, Url, ReadyFun) ->
+    s3filez_jobs_sup:queue({delete, Config, Url, ReadyFun}).
+
+
+
+%%% Nornal API - blocking on the process
 
 get(Config, Url) ->
-    case request(Config, get, Url, []) of
+    Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, []) end),
+    case Result of
         {ok, {{_Http, 200, _Ok}, Headers, Body}} ->
             {ok, ct(Headers), Body};
         Other ->
-            Other
+            ret_status(Other)
     end.
 
 delete(Config, Url) ->
-    request(Config, delete, Url, []).
+    ret_status(jobs:run(s3filez_jobs, fun() -> request(Config, delete, Url, []) end)).
 
 put(Config, Url, {data, Data}) ->
     Ctx1 = crypto:hash_update(crypto:hash_init(md5), Data),
@@ -53,7 +98,7 @@ put(Config, Url, {data, Data}) ->
         {"Content-Type", "binary/octet-stream"},
         {"Content-MD5", binary_to_list(Hash)}
     ],
-    request_with_body(Config, put, Url, Hs, Data);
+    ret_status(request_with_body(Config, put, Url, Hs, Data));
 put(Config, Url, {filename, Size, Filename}) ->
     Hash = base64:encode(checksum(Filename)),
     Hs = [
@@ -61,7 +106,7 @@ put(Config, Url, {filename, Size, Filename}) ->
         {"Content-MD5", binary_to_list(Hash)},
         {"Content-Length", integer_to_list(Size)}
     ],
-    request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}}).
+    ret_status(request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}})).
 
 put_body_file({file, Filename}) ->
     {ok, FD} = file:open(Filename, [read,binary]),
@@ -75,31 +120,72 @@ put_body_file({fd, FD}) ->
             {ok, Data, {fd, FD}}
     end.
 
+%%% Stream the contents of the url to the function, callback or to the httpc-streaming option.
+
 stream(Config, Url, Fun) when is_function(Fun,1) ->
+    stream_to_fun(Config, Url, Fun);
+stream(Config, Url, {_M,_F,_A} = MFA) ->
+    stream_to_fun(Config, Url, MFA);
+stream(Config, Url, HttpcStreamOption) ->
+    request(Config, get, Url, [{stream,HttpcStreamOption}, {sync,false}]).
+
+stream_to_fun(Config, Url, Fun) ->
     {ok, RequestId} = request(Config, get, Url, [{stream,{self,once}}, {sync,false}]),
     receive
         {http, {RequestId, stream_start, Headers, Pid}} ->
-            Fun({content_type, ct(Headers)}),
+            call_fun(Fun, {content_type, ct(Headers)}),
             httpc:stream_next(Pid),
-            ?MODULE:stream_loop(RequestId, Pid, Fun)
-    after ?TIMEOUT ->
-        Fun(timeout),
+            ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
+        {http, {RequestId, {_,_,_} = HttpRet}}->
+            Status = http_status(HttpRet),
+            call_fun(Fun, Status),
+            Status;
+        {http, {RequestId, Other}} ->
+            error_logger:error_msg("Unexpected HTTP msg for ~p: ~p", [Url,Other]),
+            {error, Other}
+    after ?CONNECT_TIMEOUT ->
+        call_fun(Fun, {error, timeout}),
         {error, timeout}
     end.
 
-stream_loop(RequestId, Pid, Fun) ->
+stream_loop(RequestId, Pid, Url, Fun) ->
     receive
-        {http, {RequestId, stream_end, _Headers}} ->
-            Fun(eof),
+        {http, {RequestId, stream_end, Headers}} ->
+            call_fun(Fun, {headers, Headers}),
+            call_fun(Fun, eof),
             ok;
         {http, {RequestId, stream, Data}} ->
-            Fun(Data),
+            call_fun(Fun, Data),
             httpc:stream_next(Pid),
-            ?MODULE:stream_loop(RequestId, Pid, Fun)
+            ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
+        {http, {RequestId, Other}} ->
+            error_logger:error_msg("Unexpected HTTP msg for ~p: ~p", [Url,Other]),
+            call_fun(Fun, {error, Other}),
+            {error, Other}
     after ?TIMEOUT ->
-        Fun(timeout),
-        {error, timeout}
+        call_fun(Fun, timeout),
+        {error, {error, timeout}}
     end.
+
+call_fun({M,F,A}, Arg) ->
+    M:F(A++[Arg]);
+call_fun(Fun, Arg) when is_function(Fun) ->
+    Fun(Arg).
+
+ret_status({ok, Rest}) ->
+    http_status(Rest);
+ret_status({error, _} = Error) ->
+    Error.
+
+http_status({{_,Code,_}, _Headers, _Body}) when Code =:= 200; Code =:= 204; Code =:= 206 ->
+    ok;
+http_status({{_,404,_}, _Headers, _Body}) ->
+    {error, not_found};
+http_status({{_,403,_}, _Headers, _Body}) ->
+    {error, forbidden};
+http_status({{_,Code,_}, _Headers, _Body}) ->
+    {error, Code}.
+
 
 request({Key,_} = Config, Method, Url, Options) ->
     {_Scheme, _Host, Path} = urlsplit(Url),
@@ -109,7 +195,7 @@ request({Key,_} = Config, Method, Url, Options) ->
         {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
         {"Date", Date}
     ],
-    httpc:request(Method, {binary_to_list(Url), Headers}, [{connect_timeout, ?TIMEOUT}], [{body_format, binary}|Options]). 
+    httpc:request(Method, {binary_to_list(Url), Headers}, opts(), [{body_format, binary}|Options]). 
 
 request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     {_Scheme, _Host, Path} = urlsplit(Url),
@@ -122,8 +208,17 @@ request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
         {"Date", Date}
         | Headers
     ],
-    httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body}, [{connect_timeout, ?TIMEOUT}], []). 
+    jobs:run(s3filez_jobs,
+             fun() ->
+                httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body}, opts(), [])
+            end).
 
+
+opts() ->
+    [
+        {connect_timeout, ?CONNECT_TIMEOUT},
+        {timeout, ?TIMEOUT}
+    ].
 
 sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Path) ->
     Data = [

@@ -3,12 +3,16 @@
   {description, "Simple file interface to/from s3"},
   {vsn, "1"},
   {registered, []},
+  {mod, {s3filez_app, []}},
   {applications, [
                   kernel,
                   stdlib,
                   crypto,
                   public_key,
-                  ssl
+                  ssl,
+                  jobs
                  ]},
-  {env, []}
+  {env, [
+      {max_connections, 100}
+  ]}
  ]}.
