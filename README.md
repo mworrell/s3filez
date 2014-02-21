@@ -41,8 +41,8 @@ Example
 Request Queue
 -------------
 
-Requests can be scheduled, they will be placed in a supervisor and scheduled using https://github.com/esl/jobs
-The current schedulder restricts the number of parallel S3 requests. The default maximum is 100.
+Requests can be queued. They will be placed in a supervisor and scheduled using https://github.com/esl/jobs
+The current scheduler restricts the number of parallel S3 requests. The default maximum is 100.
 
 The `get`, `put` and `delete` requests can be queued. A function or pid can be given as a callback for the job result.
 The `stream` command can’t be queued: it is already running asynchronously.
