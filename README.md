@@ -10,6 +10,7 @@ Distinction with other s3 clients is:
  * Only get, put and delete are supported
  * put of files and/or binaries
  * get with optional streaming function, to be able to stream to the filezcache
+ * simple jobs queue, using the 'jobs' scheduler
 
 Example
 -------
@@ -29,25 +30,30 @@ Example
     5> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
     {<<"your-aws-key">>, <<"your-aws-secret">>}
     6> s3filez:put(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, {filename, 10175, "LICENSE"}).
-    {ok,{{"HTTP/1.1",200,"OK"},
-     [{"cache-control","no-cache"},
-      {"connection","close"},
-      {"date","Wed, 19 Feb 2014 22:25:56 GMT"},
-      {"etag","\"ff253ad767462c46be284da12dda33e8\""},
-      {"server","RestServer/1.0"},
-      {"content-length","0"},
-      {"content-type","binary/octet-stream"}],
-     []}}
-    7> s3filez:stream(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(X) -> io:format("~p~n", [X]) end).
-    {content_type,<<"binary/octet-stream">>}
-    <<"\n    Apache License\n", ...>>
-    eof
+    ok
+    7> s3filez:stream(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
+    !! {content_type,<<"binary/octet-stream">>}
+    !! <<"\n    Apache License\n", ...>>
+    !! eof
     8> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
-    {ok,{{"HTTP/1.1",204,"No Content"},
-     [{"cache-control","no-cache"},
-      {"connection","close"},
-      {"date","Wed, 19 Feb 2014 22:28:42 GMT"},
-      {"server","RestServer/1.0"},
-      {"content-length","0"},
-      {"content-type","binary/octet-stream"}],
-     []}}
+    ok
+
+Request Queue
+-------------
+
+Requests can be scheduled, they will be placed in a supervisor and scheduled using https://github.com/esl/jobs
+The current schedulder restricts the number of parallel S3 requests. The default maximum is 100.
+
+The `get`, `put` and `delete` requests can be queued. A function or pid can be given as a callback for the job result.
+The `stream` command can’t be queued: it is already running asynchronously.
+
+Example:
+
+     9> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(ReqId,Result) -> nop end).
+     {ok,#Ref<0.0.0.3684>,<0.854.0>}
+
+The returned `JobPid` is the pid of the process in the s3filez queue supervisor.
+The callback can be a function (arity 2), `{M,F,A}` or a pid.
+
+If the callback is a pid then it will receive the message `{s3filez_done, ReqId, Result}`.
+
