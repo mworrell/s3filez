@@ -44,6 +44,6 @@ ensure_queue() ->
 max_connections() ->
     case application:get_env(s3filez, max_connections) of
         {ok, N} when is_integer(N) -> N;
-        undefined -> 100
+        undefined -> 20
     end.
 
