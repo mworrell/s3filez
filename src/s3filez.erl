@@ -180,7 +180,7 @@ ret_status({error, _} = Error) ->
 http_status({{_,Code,_}, _Headers, _Body}) when Code =:= 200; Code =:= 204; Code =:= 206 ->
     ok;
 http_status({{_,404,_}, _Headers, _Body}) ->
-    {error, not_found};
+    {error, enoent};
 http_status({{_,403,_}, _Headers, _Body}) ->
     {error, forbidden};
 http_status({{_,Code,_}, _Headers, _Body}) ->
