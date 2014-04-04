@@ -36,7 +36,6 @@ stop(_State) ->
 ensure_queue() ->
     jobs:add_queue(s3filez_jobs, [
             {regulators, [{counter, [
-                                {name, max_connections},
                                 {limit, max_connections()}
                              ]}]}
         ]).
@@ -46,4 +45,3 @@ max_connections() ->
         {ok, N} when is_integer(N) -> N;
         undefined -> 20
     end.
-
