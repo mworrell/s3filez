@@ -31,7 +31,7 @@
 -record(state, {job_id, cmd}).
 
 start_link(JobId, Cmd) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [JobId, Cmd], []).
+    gen_server:start_link({via, gproc, {n,l,{s3filez_job,JobId}}}, ?MODULE, [JobId, Cmd], []).
 
 init([JobId, Cmd]) ->
     gen_server:cast(self(), run),
@@ -62,8 +62,9 @@ do_cmd(JobId, {delete, Config, Url, OnReady}) ->
     on_ready(JobId, Result, OnReady);
 do_cmd(JobId, {put, Config, Url, What, OnReady}) ->
     Result = s3filez:put(Config, Url, What),
-    on_ready(JobId, Result, OnReady).
-
+    on_ready(JobId, Result, OnReady);
+do_cmd(_JobId, {stream, Config, Url, StreamFun}) ->
+    s3filez:stream(Config, Url, StreamFun).
 
 on_ready(_JobId, _Result, undefined) ->
     ok;

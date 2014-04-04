@@ -22,10 +22,16 @@
 
 -export([
     queue_get/3,
+    queue_get_id/4,
     queue_put/3,
     queue_put/4,
+    queue_put_id/5,
     queue_delete/2,
     queue_delete/3,
+    queue_delete_id/4,
+
+    queue_stream/3,
+    queue_stream_id/4,
 
     get/2,
     delete/2,
@@ -45,36 +51,62 @@
 -type config() :: {binary(), binary()}.
 -type url() :: binary().
 -type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
+-type stream_fun() :: {atom(),atom(),list()} | fun() | pid().
 -type put_data() :: {data, binary()} | {filename, pos_integer(), file:filename()}.
-
+-type queue_reply() :: {ok, any(), pid()} | {error, {already_started, pid()}}.
 
 %%% Queuing functions, starts a process and signals the ready_fun() when ready.
 
--spec queue_get(config(), url(), ready_fun()) -> {ok, reference(), pid()}.
+-spec queue_get(config(), url(), ready_fun()) -> queue_reply().
 
 queue_get(Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue({get, Config, Url, ReadyFun}).
 
--spec queue_put(config(), url(), put_data()) -> {ok, reference(), pid()}.
+
+-spec queue_get_id(any(), config(), url(), ready_fun()) -> queue_reply().
+
+queue_get_id(JobId, Config, Url, ReadyFun) ->
+    s3filez_jobs_sup:queue(JobId, {get, Config, Url, ReadyFun}).
+
+-spec queue_put(config(), url(), put_data()) -> queue_reply().
 
 queue_put(Config, Url, What) ->
     queue_put(Config, Url, What, undefined).
 
--spec queue_put(config(), url(), put_data(), ready_fun()) -> {ok, reference(), pid()}.
+-spec queue_put(config(), url(), put_data(), ready_fun()) -> queue_reply().
 
 queue_put(Config, Url, What, ReadyFun) ->
     s3filez_jobs_sup:queue({put, Config, Url, What, ReadyFun}).
 
--spec queue_delete(config(), url()) -> {ok, reference(), pid()}.
+-spec queue_put_id(any(), config(), url(), put_data(), ready_fun()) -> queue_reply().
+
+queue_put_id(JobId, Config, Url, What, ReadyFun) ->
+    s3filez_jobs_sup:queue(JobId, {put, Config, Url, What, ReadyFun}).
+
+-spec queue_delete(config(), url()) -> queue_reply().
 
 queue_delete(Config, Url) ->
     queue_delete(Config, Url, undefined).
 
--spec queue_delete(config(), url(), ready_fun()) -> {ok, reference(), pid()}.
+-spec queue_delete(config(), url(), ready_fun()) -> queue_reply().
 
 queue_delete(Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue({delete, Config, Url, ReadyFun}).
 
+-spec queue_delete_id(any(), config(), url(), ready_fun()) -> queue_reply().
+
+queue_delete_id(JobId, Config, Url, ReadyFun) ->
+    s3filez_jobs_sup:queue(JobId, {delete, Config, Url, ReadyFun}).
+
+-spec queue_stream(config(), url(), stream_fun()) -> queue_reply().
+
+queue_stream(Config, Url, StreamFun) ->
+    s3filez_jobs_sup:queue({stream, Config, Url, StreamFun}).
+
+-spec queue_stream_id(any(), config(), url(), stream_fun()) -> queue_reply().
+
+queue_stream_id(JobId, Config, Url, StreamFun) ->
+    s3filez_jobs_sup:queue(JobId, {stream, Config, Url, StreamFun}).
 
 
 %%% Nornal API - blocking on the process
@@ -168,7 +200,7 @@ stream_loop(RequestId, Pid, Url, Fun) ->
     end.
 
 call_fun({M,F,A}, Arg) ->
-    M:F(A++[Arg]);
+    erlang:apply(M,F,A++[Arg]);
 call_fun(Fun, Arg) when is_function(Fun) ->
     Fun(Arg).
 

@@ -21,17 +21,20 @@
 
 %% API
 -export([
-	start_link/0,
-	queue/1
-	]).
+    start_link/0,
+    queue/1,
+    queue/2
+    ]).
 
 %% Supervisor callbacks
 -export([init/1]).
 
 queue(S3Job) ->
-	Ref = erlang:make_ref(),
-	{ok, Pid} = supervisor:start_child(?MODULE, [Ref, S3Job]),
-	{ok, Ref, Pid}.
+    queue(erlang:make_ref(), S3Job).
+
+queue(Ref, S3Job) ->
+    {ok, Pid} = supervisor:start_child(?MODULE, [Ref, S3Job]),
+    {ok, Ref, Pid}.
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
