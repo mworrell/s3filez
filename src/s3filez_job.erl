@@ -60,8 +60,8 @@ do_cmd(JobId, {get, Config, Url, OnReady}) ->
 do_cmd(JobId, {delete, Config, Url, OnReady}) ->
     Result = s3filez:delete(Config, Url),
     on_ready(JobId, Result, OnReady);
-do_cmd(JobId, {put, Config, Url, What, OnReady}) ->
-    Result = s3filez:put(Config, Url, What),
+do_cmd(JobId, {put, Config, Url, What, OnReady, Options}) ->
+    Result = s3filez:put(Config, Url, What, Options),
     on_ready(JobId, Result, OnReady);
 do_cmd(_JobId, {stream, Config, Url, StreamFun}) ->
     s3filez:stream(Config, Url, StreamFun).
