@@ -263,9 +263,9 @@ http_status({{_,Code,_}, _Headers, _Body}) ->
 
 
 request({Key,_} = Config, Method, Url, Headers, Options) ->
-    {_Scheme, _Host, Path} = urlsplit(Url),
+    {_Scheme, Host, Path} = urlsplit(Url),
     Date = httpd_util:rfc1123_date(),
-    Signature = sign(Config, Method, "", "", Date, Headers, Path),
+    Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
     AllHeaders = [
         {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
         {"Date", Date} | Headers
@@ -273,11 +273,11 @@ request({Key,_} = Config, Method, Url, Headers, Options) ->
     httpc:request(Method, {binary_to_list(Url), AllHeaders}, opts(), [{body_format, binary}|Options]). 
 
 request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
-    {_Scheme, _Host, Path} = urlsplit(Url),
+    {_Scheme, Host, Path} = urlsplit(Url),
     {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
     {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
     Date = httpd_util:rfc1123_date(),
-    Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Path),
+    Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
     Hs1 = [
         {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
         {"Date", Date}
@@ -295,15 +295,22 @@ opts() ->
         {timeout, ?TIMEOUT}
     ].
 
-sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Path) ->
+sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
+    ResourcePrefix =
+        case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of
+            [<<"com">>, <<"amazonaws">> | _] ->
+                ["/", hd(Split)];
+            _ ->
+                []
+        end,
     Data = [
-        method_string(Method), $\n,
-        BodyMD5, $\n,
-        ContentType, $\n,
-        Date, $\n,
-        canonicalize_amz_headers(Headers),
-        Path
-    ],
+            method_string(Method), $\n,
+            BodyMD5, $\n,
+            ContentType, $\n,
+            Date, $\n,
+            canonicalize_amz_headers(Headers),
+            iolist_to_binary([ResourcePrefix, Path])
+           ],
     base64:encode(crypto:sha_mac(Secret,Data)).
 
 method_string('put') -> "PUT";
