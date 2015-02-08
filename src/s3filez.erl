@@ -263,7 +263,9 @@ http_status({{_,Code,_}, _Headers, _Body}) ->
 
 
 request({Key,_} = Config, Method, Url, Headers, Options) ->
-    {_Scheme, _Host, Path} = urlsplit(Url),
+    {_Scheme, Host, FileName} = urlsplit(Url),
+	Bucket = hd(binary:split(Host, <<".">>)),
+	Path = <<"/",Bucket/binary,FileName/binary>>,
     Date = httpd_util:rfc1123_date(),
     Signature = sign(Config, Method, "", "", Date, Headers, Path),
     AllHeaders = [
@@ -273,7 +275,9 @@ request({Key,_} = Config, Method, Url, Headers, Options) ->
     httpc:request(Method, {binary_to_list(Url), AllHeaders}, opts(), [{body_format, binary}|Options]). 
 
 request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
-    {_Scheme, _Host, Path} = urlsplit(Url),
+    {_Scheme, Host, FileName} = urlsplit(Url),
+	Bucket = hd(binary:split(Host, <<".">>)),
+	Path = <<"/",Bucket/binary,FileName/binary>>,
     {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
     {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
     Date = httpd_util:rfc1123_date(),
