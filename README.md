@@ -38,6 +38,11 @@ Example
     8> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
     ok
 
+Or, on Amazon S3:
+
+    6> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
+
+
 Request Queue
 -------------
 
