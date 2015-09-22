@@ -33,8 +33,10 @@ queue(S3Job) ->
     queue(erlang:make_ref(), S3Job).
 
 queue(Ref, S3Job) ->
-    {ok, Pid} = supervisor:start_child(?MODULE, [Ref, S3Job]),
-    {ok, Ref, Pid}.
+    case supervisor:start_child(?MODULE, [Ref, S3Job]) of
+        {ok, Pid} -> {ok, Ref, Pid};
+        {error, {already_started, Pid}} -> {ok, Ref, Pid}
+    end.
 
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
