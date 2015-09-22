@@ -47,7 +47,7 @@
     ]).
 
 -define(BLOCK_SIZE, 65536).
--define(CONNECT_TIMEOUT, 30000).    % 30s
+-define(CONNECT_TIMEOUT, 60000).    % 60s
 -define(TIMEOUT, 1800000).          % 30m
 
 -type config() :: {binary(), binary()}.
