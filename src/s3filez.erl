@@ -270,7 +270,9 @@ request({Key,_} = Config, Method, Url, Headers, Options) ->
         {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
         {"Date", Date} | Headers
     ],
-    httpc:request(Method, {binary_to_list(Url), AllHeaders}, opts(), [{body_format, binary}|Options]). 
+    httpc:request(Method, {binary_to_list(Url), AllHeaders}, 
+                  opts(), [{body_format, binary}|Options],
+                  httpc_s3filez_profile). 
 
 request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     {_Scheme, Host, Path} = urlsplit(Url),
@@ -285,7 +287,9 @@ request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     ],
     jobs:run(s3filez_jobs,
              fun() ->
-                httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body}, opts(), [])
+                httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
+                              opts(), [],
+                              httpc_s3filez_profile)
             end).
 
 

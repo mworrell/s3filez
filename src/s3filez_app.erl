@@ -22,6 +22,7 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
+    ensure_httpc_profile(),
     case s3filez_sup:start_link() of
         {ok, Pid} ->
             ensure_queue(),
@@ -33,6 +34,16 @@ start(_StartType, _StartArgs) ->
 stop(_State) ->
     ok.
 
+ensure_httpc_profile() ->
+    case inets:start(httpc, [{profile, httpc_s3filez_profile}]) of
+        {ok, _} ->
+            ok = httpc:set_options([
+                {max_sessions, max_connections()}
+            ], httpc_s3filez_profile),
+            ok;
+        {error, {already_started, _}} -> ok
+    end.
+
 ensure_queue() ->
     jobs:add_queue(s3filez_jobs, [
             {regulators, [{counter, [
@@ -43,5 +54,5 @@ ensure_queue() ->
 max_connections() ->
     case application:get_env(s3filez, max_connections) of
         {ok, N} when is_integer(N) -> N;
-        undefined -> 20
+        undefined -> 100
     end.
