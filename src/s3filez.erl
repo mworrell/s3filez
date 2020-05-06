@@ -1,7 +1,8 @@
+%% @doc S3 file storage. Can put, get and stream files from S3 compatible services.
 %% @author Marc Worrell
-%% @copyright 2013-2014 Marc Worrell
+%% @copyright 2013-2020 Marc Worrell
 
-%% Copyright 2014 Marc Worrell
+%% Copyright 2013-2020 Marc Worrell
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -58,74 +59,93 @@
 -type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
 -type stream_fun() :: {atom(),atom(),list()} | fun() | pid().
 -type put_data() :: {data, binary()} | {filename, pos_integer(), file:filename()}.
+
 -type queue_reply() :: {ok, any(), pid()} | {error, {already_started, pid()}}.
 
--type put_opts() :: [put_opt()].
+-type sync_reply() :: ok | {error, enoent | forbidden | http_code()}.
+-type http_code() :: 100..600.
+
+-type put_opts() :: [ put_opt() ].
 -type put_opt() :: {acl, acl_type()} | {content_type, string()}.
--type acl_type() :: private | public_read | public_read_write | authenticated_read | bucket_owner_read | bucket_owner_full_control.
+-type acl_type() :: private | public_read | public_read_write | authenticated_read
+                  | bucket_owner_read | bucket_owner_full_control.
 
 
-%%% Queuing functions, starts a process and signals the ready_fun() when ready.
-
+%% @doc Queue a file dowloader and call ready_fun when finished.
 -spec queue_get(config(), url(), ready_fun()) -> queue_reply().
-
 queue_get(Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue({get, Config, Url, ReadyFun}).
 
 
+%% @doc Queue a named file dowloader and call ready_fun when finished.
+%%      Names must be unique, duplicates are refused with <tt>{error, {already_started, _}}</tt>.
 -spec queue_get_id(any(), config(), url(), ready_fun()) -> queue_reply().
-
 queue_get_id(JobId, Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue(JobId, {get, Config, Url, ReadyFun}).
 
--spec queue_put(config(), url(), put_data()) -> queue_reply().
 
+%% @doc Queue a file uploader. The data can be a binary or a filename.
+-spec queue_put(config(), url(), put_data()) -> queue_reply().
 queue_put(Config, Url, What) ->
     queue_put(Config, Url, What, undefined).
 
--spec queue_put(config(), url(), put_data(), ready_fun()) -> queue_reply().
 
+%% @doc Queue a file uploader and call ready_fun when finished.
+-spec queue_put(config(), url(), put_data(), ready_fun()) -> queue_reply().
 queue_put(Config, Url, What, ReadyFun) ->
     queue_put(Config, Url, What, ReadyFun, []).
 
--spec queue_put(config(), url(), put_data(), ready_fun(), put_opts()) -> queue_reply().
 
+%% @doc Queue a file uploader and call ready_fun when finished. Options include
+%% the <tt>acl</tt> setting and <tt>content_type</tt> for the file.
+-spec queue_put(config(), url(), put_data(), ready_fun(), put_opts()) -> queue_reply().
 queue_put(Config, Url, What, ReadyFun, Opts) ->
     s3filez_jobs_sup:queue({put, Config, Url, What, ReadyFun, Opts}).
 
+%% @doc Start a named file uploader. Names must be unique, duplicates are refused with
+%% <tt>{error, {already_started, _}}</tt>.
 -spec queue_put_id(any(), config(), url(), put_data(), ready_fun()) -> queue_reply().
-
 queue_put_id(JobId, Config, Url, What, ReadyFun) ->
     s3filez_jobs_sup:queue(JobId, {put, Config, Url, What, ReadyFun}).
 
--spec queue_delete(config(), url()) -> queue_reply().
 
+%% @doc Async delete a file on S3
+-spec queue_delete(config(), url()) -> queue_reply().
 queue_delete(Config, Url) ->
     queue_delete(Config, Url, undefined).
 
+%% @doc Async delete a file on S3, call ready_fun when ready.
 -spec queue_delete(config(), url(), ready_fun()) -> queue_reply().
-
 queue_delete(Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue({delete, Config, Url, ReadyFun}).
 
--spec queue_delete_id(any(), config(), url(), ready_fun()) -> queue_reply().
 
+%% @doc Queue a named file deletion process, call ready_fun when ready.
+-spec queue_delete_id(any(), config(), url(), ready_fun()) -> queue_reply().
 queue_delete_id(JobId, Config, Url, ReadyFun) ->
     s3filez_jobs_sup:queue(JobId, {delete, Config, Url, ReadyFun}).
 
--spec queue_stream(config(), url(), stream_fun()) -> queue_reply().
 
+%% @doc Queue a file downloader that will stream chunks to the given stream_fun. The
+%% default block size for the chunks is 64KB.
+-spec queue_stream(config(), url(), stream_fun()) -> queue_reply().
 queue_stream(Config, Url, StreamFun) ->
     s3filez_jobs_sup:queue({stream, Config, Url, StreamFun}).
 
--spec queue_stream_id(any(), config(), url(), stream_fun()) -> queue_reply().
 
+%% @doc Queue a named file downloader that will stream chunks to the given stream_fun. The
+%% default block size for the chunks is 64KB.
+-spec queue_stream_id(any(), config(), url(), stream_fun()) -> queue_reply().
 queue_stream_id(JobId, Config, Url, StreamFun) ->
     s3filez_jobs_sup:queue(JobId, {stream, Config, Url, StreamFun}).
 
 
 %%% Normal API - blocking on the process
 
+%% @doc Fetch the data at the url.
+-spec get( config(), url() ) ->
+      {ok, ContentType::string(), Data::binary()}
+    | {error, enoent | forbidden | http_code()}.
 get(Config, Url) ->
     Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, [], []) end),
     case Result of
@@ -135,12 +155,20 @@ get(Config, Url) ->
             ret_status(Other)
     end.
 
+%% @doc Delete the file at the url.
+-spec delete( config(), url() ) -> sync_reply().
 delete(Config, Url) ->
     ret_status(jobs:run(s3filez_jobs, fun() -> request(Config, delete, Url, [], []) end)).
 
+
+%% @doc Put a binary or file to the given url.
+-spec put( config(), url(), put_data() ) -> sync_reply().
 put(Config, Url, Payload) ->
     put(Config, Url, Payload, []).
 
+
+%% @doc Put a binary or file to the given url. Set options for acl and/or content_type.
+-spec put( config(), url(), put_data(), put_opts() ) -> sync_reply().
 put(Config, Url, {data, Data}, Opts) ->
     Ctx1 = crypto:hash_update(crypto:hash_init(md5), Data),
     Hash = base64:encode(crypto:hash_final(Ctx1)),
@@ -149,7 +177,6 @@ put(Config, Url, {data, Data}, Opts) ->
           | opts_to_headers(Opts)
     ],
     ret_status(request_with_body(Config, put, Url, Hs, Data));
-
 put(Config, Url, {filename, Size, Filename}, Opts) ->
     Hash = base64:encode(checksum(Filename)),
     Hs = [
@@ -171,10 +198,13 @@ put_body_file({fd, FD}) ->
             {ok, Data, {fd, FD}}
     end.
 
-
+%% @doc Create a private bucket at the URL.
+-spec create_bucket( config(), url() ) -> sync_reply().
 create_bucket(Config, Url) ->
     create_bucket(Config, Url, [ {acl, private} ]).
 
+%% @doc Create a bucket at the URL, with acl options.
+-spec create_bucket( config(), url(), put_opts() ) -> sync_reply().
 create_bucket(Config, Url, Opts) ->
     Ctx1 = crypto:hash_update(crypto:hash_init(md5), <<>>),
     Hash = base64:encode(crypto:hash_final(Ctx1)),
@@ -214,6 +244,7 @@ encode_acl(bucket_owner_full_control) -> "bucket-owner-full-control".
   
 %%% Stream the contents of the url to the function, callback or to the httpc-streaming option.
 
+-spec stream( config(), url(), stream_fun() ) -> sync_reply().
 stream(Config, Url, Fun) when is_function(Fun,1) ->
     stream_to_fun(Config, Url, Fun);
 stream(Config, Url, {_M,_F,_A} = MFA) ->
@@ -240,6 +271,7 @@ stream_to_fun(Config, Url, Fun) ->
         {error, timeout}
     end.
 
+%% @private
 stream_loop(RequestId, Pid, Url, Fun) ->
     receive
         {http, {RequestId, stream_end, Headers}} ->
@@ -336,9 +368,7 @@ sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
 
 method_string('put') -> "PUT";
 method_string('get') -> "GET";
-method_string('delete') -> "DELETE";
-method_string('post') -> "POST";
-method_string('head') -> "HEAD".
+method_string('delete') -> "DELETE".
 
 canonicalize_amz_headers(Headers) ->
     AmzHeaders = lists:sort(lists:filter(fun({"x-amz-" ++ _, _}) -> true; (_) -> false end, Headers)),

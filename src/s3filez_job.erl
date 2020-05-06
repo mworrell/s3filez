@@ -1,7 +1,7 @@
 %% @author Marc Worrell
-%% @copyright 2013-2014 Marc Worrell
+%% @copyright 2013-2020 Marc Worrell
 
-%% Copyright 2014 Marc Worrell
+%% Copyright 2013-2020 Marc Worrell
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -48,7 +48,7 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 code_change(_OldVersion, State, _Extra) ->
-    {noreply, State}.
+    {ok, State}.
 
 terminate(_Reason, _State) ->
     ok.

@@ -1,6 +1,6 @@
 {application, s3filez,
  [
-  {description, "Simple file interface to/from s3"},
+  {description, "Stream and file interface for S3 storage"},
   {vsn, "1"},
   {registered, []},
   {mod, {s3filez_app, []}},

@@ -1,0 +1,8 @@
+{"1.1.0",
+[{<<"jobs">>,{pkg,<<"jobs">>,<<"0.9.0">>},0},
+ {<<"parse_trans">>,{pkg,<<"parse_trans">>,<<"3.3.0">>},1}]}.
+[
+{pkg_hash,[
+ {<<"jobs">>, <<"B2F0071531C4A48575A096FEC428DCDD4555C64E5086FE521FCEAF581B1F51DC">>},
+ {<<"parse_trans">>, <<"09765507A3C7590A784615CFD421D101AEC25098D50B89D7AA1D66646BC571C1">>}]}
+].

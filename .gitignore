@@ -6,4 +6,6 @@ priv
 *.beam
 *.plt
 ebin/
-rebar
+rebar3
+_build
+doc/
