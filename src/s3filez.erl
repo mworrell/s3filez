@@ -1,4 +1,5 @@
 %% @doc S3 file storage. Can put, get and stream files from S3 compatible services.
+%% Uses a job queue which is regulated by "jobs".
 %% @author Marc Worrell
 %% @copyright 2013-2020 Marc Worrell
 

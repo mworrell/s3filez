@@ -1,3 +1,4 @@
+%% @doc Async queued job, scheduled by jobs and supervised by s3filez_sup.
 %% @author Marc Worrell
 %% @copyright 2013-2020 Marc Worrell
 

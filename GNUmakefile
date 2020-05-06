@@ -51,11 +51,11 @@ clean_logs:
 
 .PHONY: clean
 clean: clean_logs $(REBAR)
-	@echo "removing:"
 	@echo "cleaning ebin:"
 	$(REBAR) $(REBAR_OPTS) clean
 
 .PHONY: dist-clean
 dist-clean: clean
 	$(REBAR) $(REBAR_OPTS) clean -a
+	rm -rf _build doc deps
 	rm -f ./rebar3

@@ -1,3 +1,5 @@
+%% @doc Main app code. Ensure the httpc profiles are present, start the
+%% supervisor for the queued jobs.
 %% @author Marc Worrell
 %% @copyright 2013-2020 Marc Worrell
 
