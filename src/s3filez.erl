@@ -38,7 +38,10 @@
     delete/2,
     put/3,
     put/4,
-    stream/3
+    stream/3,
+
+    create_bucket/2,
+    create_bucket/3
     ]).
 
 -export([
@@ -121,7 +124,7 @@ queue_stream_id(JobId, Config, Url, StreamFun) ->
     s3filez_jobs_sup:queue(JobId, {stream, Config, Url, StreamFun}).
 
 
-%%% Nornal API - blocking on the process
+%%% Normal API - blocking on the process
 
 get(Config, Url) ->
     Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, [], []) end),
@@ -167,6 +170,20 @@ put_body_file({fd, FD}) ->
         {ok, Data} ->
             {ok, Data, {fd, FD}}
     end.
+
+
+create_bucket(Config, Url) ->
+    create_bucket(Config, Url, [ {acl, private} ]).
+
+create_bucket(Config, Url, Opts) ->
+    Ctx1 = crypto:hash_update(crypto:hash_init(md5), <<>>),
+    Hash = base64:encode(crypto:hash_final(Ctx1)),
+    Hs = [
+        {"Content-MD5", binary_to_list(Hash)}
+        | opts_to_headers(Opts)
+    ],
+    ret_status(request_with_body(Config, put, Url, Hs, <<>>)).
+
 
 opts_to_headers(Opts) ->
     Hs = lists:foldl(
