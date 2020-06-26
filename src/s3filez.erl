@@ -145,7 +145,7 @@ queue_stream_id(JobId, Config, Url, StreamFun) ->
 
 %% @doc Fetch the data at the url.
 -spec get( config(), url() ) ->
-      {ok, ContentType::string(), Data::binary()}
+      {ok, ContentType::binary(), Data::binary()}
     | {error, enoent | forbidden | http_code()}.
 get(Config, Url) ->
     Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, [], []) end),
