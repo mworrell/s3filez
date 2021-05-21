@@ -1,5 +1,7 @@
-[![Test](https://github.com/mworrell/s3filez/workflows/Test/badge.svg)](https://github.com/zotonic/zotonic/actions?query=workflow%3ATest)
+[![Test](https://github.com/mworrell/s3filez/workflows/Test/badge.svg)](https://github.com/mworrell/s3filez/actions)
 
+[![Hex.pm Version](https://img.shields.io/hexpm/v/s3filez.svg)](https://hex.pm/packages/s3filez)
+[![Hex.pm Downloads](https://img.shields.io/hexpm/dt/s3filez.svg)](https://hex.pm/packages/s3filez)
 
 s3filez
 =======
@@ -18,8 +20,8 @@ Distinction with other s3 clients is:
 Example
 -------
 
-```
-$ ./rebar3 shell
+```erlang
+rebar3 shell
 ===> Verifying dependencies...
 ===> Analyzing applications...
 ===> Compiling s3filez
@@ -43,7 +45,7 @@ ok
 Request Queue
 -------------
 
-Requests can be queued. They will be placed in a supervisor and scheduled using https://github.com/esl/jobs
+Requests can be queued. They will be placed in a supervisor and scheduled using https://github.com/uwiger/jobs
 The current scheduler restricts the number of parallel S3 requests. The default maximum is 100.
 
 The `get`, `put` and `delete` requests can be queued. A function or pid can be given as a callback for the job result.
@@ -51,7 +53,7 @@ The `stream` command can’t be queued: it is already running asynchronously.
 
 Example:
 
-```
+```erlang
 6> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(ReqId,Result) -> nop end).
 {ok,#Ref<0.0.0.3684>,<0.854.0>}
 ```
