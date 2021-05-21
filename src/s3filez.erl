@@ -1,9 +1,9 @@
 %% @doc S3 file storage. Can put, get and stream files from S3 compatible services.
 %% Uses a job queue which is regulated by "jobs".
 %% @author Marc Worrell
-%% @copyright 2013-2020 Marc Worrell
+%% @copyright 2013-2021 Marc Worrell
 
-%% Copyright 2013-2020 Marc Worrell
+%% Copyright 2013-2021 Marc Worrell
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -414,6 +414,9 @@ urlsplit(Url) ->
 
 urlsplit_hostpath(HP) ->
     case binary:split(HP, <<"/">>) of
-        [Host,Path] -> {Host,<<"/", Path/binary>>};
+        [Host,Path] -> {Host,urlsplit_path(binary:split(Path, <<"?">>))};
         [Host] -> {Host, <<"/">>}
     end.
+
+urlsplit_path([Path]) -> <<"/", Path/binary>>;
+urlsplit_path([Path, _]) -> <<"/", Path/binary>>.
