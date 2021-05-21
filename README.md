@@ -18,26 +18,27 @@ Distinction with other s3 clients is:
 Example
 -------
 
-    $ ./rebar3 shell
-    ===> Verifying dependencies...
-    ===> Analyzing applications...
-    ===> Compiling s3filez
-    Erlang/OTP 23 [erts-11.1] [source] [64-bit] [smp:12:12] [ds:12:12:10] [async-threads:1] [hipe]
+```
+$ ./rebar3 shell
+===> Verifying dependencies...
+===> Analyzing applications...
+===> Compiling s3filez
+Erlang/OTP 23 [erts-11.1] [source] [64-bit] [smp:12:12] [ds:12:12:10] [async-threads:1] [hipe]
 
-    Eshell V11.1  (abort with ^G)
-    1> application:ensure_all_started(s3filez).
-    {ok,[jobs,s3filez]}
-    2> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
-    {<<"your-aws-key">>, <<"your-aws-secret">>}
-    3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
-    ok
-    4> s3filez:stream(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
-    !! {content_type,<<"binary/octet-stream">>}
-    !! <<"\n    Apache License\n", ...>>
-    !! eof
-    5> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
-    ok
-
+Eshell V11.1  (abort with ^G)
+1> application:ensure_all_started(s3filez).
+{ok,[jobs,s3filez]}
+2> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
+{<<"your-aws-key">>, <<"your-aws-secret">>}
+3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
+ok
+4> s3filez:stream(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
+!! {content_type,<<"binary/octet-stream">>}
+!! <<"\n    Apache License\n", ...>>
+!! eof
+5> s3filez:delete(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>).
+ok
+```
 
 Request Queue
 -------------
@@ -50,8 +51,10 @@ The `stream` command can’t be queued: it is already running asynchronously.
 
 Example:
 
-     9> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(ReqId,Result) -> nop end).
-     {ok,#Ref<0.0.0.3684>,<0.854.0>}
+```
+6> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(ReqId,Result) -> nop end).
+{ok,#Ref<0.0.0.3684>,<0.854.0>}
+```
 
 The returned `JobPid` is the pid of the process in the s3filez queue supervisor.
 The callback can be a function (arity 2), `{M,F,A}` or a pid.
