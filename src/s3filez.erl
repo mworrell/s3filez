@@ -365,7 +365,7 @@ sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
             canonicalize_amz_headers(Headers),
             iolist_to_binary([ResourcePrefix, Path])
            ],
-    base64:encode(crypto:hmac(sha, Secret, Data)).
+    base64:encode(crypto:mac(hmac, sha, Secret, Data)).
 
 method_string('put') -> "PUT";
 method_string('get') -> "GET";

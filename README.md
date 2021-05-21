@@ -1,3 +1,6 @@
+[![Test](https://github.com/mworrell/s3filez/workflows/Test/badge.svg)](https://github.com/zotonic/zotonic/actions?query=workflow%3ATest)
+
+
 s3filez
 =======
 
@@ -15,32 +18,25 @@ Distinction with other s3 clients is:
 Example
 -------
 
-    $ erl -pa ebin
-    Erlang R15B03 (erts-5.9.3.1) [source] [64-bit] [smp:4:4] [async-threads:0] [kernel-poll:false]
+    $ ./rebar3 shell
+    ===> Verifying dependencies...
+    ===> Analyzing applications...
+    ===> Compiling s3filez
+    Erlang/OTP 23 [erts-11.1] [source] [64-bit] [smp:12:12] [ds:12:12:10] [async-threads:1] [hipe]
 
-    Eshell V5.9.3.1  (abort with ^G)
-    1> application:start(crypto).  
-    ok
-    2> application:start(public_key).   
-    ok
-    3> application:start(ssl).          
-    ok
-    4> application:start(inets).
-    ok
-    5> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
+    Eshell V11.1  (abort with ^G)
+    1> application:ensure_all_started(s3filez).
+    {ok,[jobs,s3filez]}
+    2> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
     {<<"your-aws-key">>, <<"your-aws-secret">>}
-    6> s3filez:put(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, {filename, 10175, "LICENSE"}).
+    3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
     ok
-    7> s3filez:stream(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
+    4> s3filez:stream(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
     !! {content_type,<<"binary/octet-stream">>}
     !! <<"\n    Apache License\n", ...>>
     !! eof
-    8> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
+    5> s3filez:delete(Cfg, <<"https://s.greenqloud.com/youraccount-default/Documents/LICENSE">>).
     ok
-
-Or, on Amazon S3:
-
-    6> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
 
 
 Request Queue
