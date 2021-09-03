@@ -18,5 +18,5 @@
   ]},
   {maintainers, ["Zotonic Team"]},
   {licenses, ["Apache 2.0"]},
-  {links, [{"GitHub", "https://github.com/zotonic/template_compiler"}]}
+  {links, [{"GitHub", "https://github.com/mworrell/s3filez"}]}
  ]}.
