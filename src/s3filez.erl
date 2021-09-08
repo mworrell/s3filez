@@ -241,8 +241,8 @@ encode_acl(authenticated_read)        -> "authenticated-read";
 encode_acl(bucket_owner_read)         -> "bucket-owner-read";
 encode_acl(bucket_owner_full_control) -> "bucket-owner-full-control".
 
-    
-  
+
+
 %%% Stream the contents of the url to the function, callback or to the httpc-streaming option.
 
 -spec stream( config(), url(), stream_fun() ) -> sync_reply().
@@ -317,12 +317,12 @@ request({Key,_} = Config, Method, Url, Headers, Options) ->
     Date = httpd_util:rfc1123_date(),
     Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
     AllHeaders = [
-        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
+        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
         {"Date", Date} | Headers
     ],
-    httpc:request(Method, {binary_to_list(Url), AllHeaders}, 
-                  opts(), [{body_format, binary}|Options],
-                  httpc_s3filez_profile). 
+    httpc:request(Method, {binary_to_list(Url), AllHeaders},
+                  opts(Host), [{body_format, binary}|Options],
+                  httpc_s3filez_profile).
 
 request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     {_Scheme, Host, Path} = urlsplit(Url),
@@ -331,21 +331,22 @@ request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     Date = httpd_util:rfc1123_date(),
     Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
     Hs1 = [
-        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},   
+        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
         {"Date", Date}
         | Headers
     ],
     jobs:run(s3filez_jobs,
              fun() ->
                 httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
-                              opts(), [],
+                              opts(Host), [],
                               httpc_s3filez_profile)
             end).
 
 
-opts() ->
+opts( Host ) ->
     [
         {connect_timeout, ?CONNECT_TIMEOUT},
+        {ssl, tls_certificate_check:options(Host)},
         {timeout, ?TIMEOUT}
     ].
 
@@ -378,7 +379,7 @@ canonicalize_amz_headers(Headers) ->
       H, $:, V, $\n
      ]
      || {H, V} <- AmzHeaders
-    ].    
+    ].
 
 ct(Headers) ->
     list_to_binary(proplists:get_value("content-type", Headers, "binary/octet-stream")).
