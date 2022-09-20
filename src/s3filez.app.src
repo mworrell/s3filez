@@ -11,7 +11,8 @@
                   public_key,
                   ssl,
                   inets,
-                  jobs
+                  jobs,
+                  tls_certificate_check
                  ]},
   {env, [
       {max_connections, 100}
