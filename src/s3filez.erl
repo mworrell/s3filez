@@ -51,6 +51,8 @@
     stream_loop/4
     ]).
 
+-include_lib("kernel/include/logger.hrl").
+
 -define(BLOCK_SIZE, 65536).
 -define(CONNECT_TIMEOUT, 60000).    % 60s
 -define(TIMEOUT, 1800000).          % 30m
@@ -59,7 +61,9 @@
 -type url() :: binary().
 -type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
 -type stream_fun() :: {atom(),atom(),list()} | fun() | pid().
--type put_data() :: {data, binary()} | {filename, pos_integer(), file:filename()}.
+-type put_data() :: {data, binary()}
+                  | {filename, pos_integer(), file:filename_all()}
+                  | {filename, file:filename_all()}.
 
 -type queue_reply() :: {ok, any(), pid()} | {error, {already_started, pid()}}.
 
@@ -178,6 +182,9 @@ put(Config, Url, {data, Data}, Opts) ->
           | opts_to_headers(Opts)
     ],
     ret_status(request_with_body(Config, put, Url, Hs, Data));
+put(Config, Url, {filename, Filename}, Opts) ->
+    Size = filelib:file_size(Filename),
+    put(Config, Url, {filename, Size, Filename}, Opts);
 put(Config, Url, {filename, Size, Filename}, Opts) ->
     Hash = base64:encode(checksum(Filename)),
     Hs = [
@@ -257,6 +264,7 @@ stream_to_fun(Config, Url, Fun) ->
     {ok, RequestId} = request(Config, get, Url, [], [{stream,{self,once}}, {sync,false}]),
     receive
         {http, {RequestId, stream_start, Headers, Pid}} ->
+            call_fun(Fun, stream_start),
             call_fun(Fun, {content_type, ct(Headers)}),
             httpc:stream_next(Pid),
             ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
@@ -265,7 +273,13 @@ stream_to_fun(Config, Url, Fun) ->
             call_fun(Fun, Status),
             Status;
         {http, {RequestId, Other}} ->
-            error_logger:error_msg("Unexpected HTTP msg for ~p: ~p", [Url,Other]),
+            ?LOG_ERROR(#{
+                text => <<"Unexpected HTTP message">>,
+                in => s3filez,
+                result => error,
+                reason => Other,
+                url => Url
+            }),
             {error, Other}
     after ?CONNECT_TIMEOUT ->
         call_fun(Fun, {error, timeout}),
@@ -284,7 +298,13 @@ stream_loop(RequestId, Pid, Url, Fun) ->
             httpc:stream_next(Pid),
             ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
         {http, {RequestId, Other}} ->
-            error_logger:error_msg("Unexpected HTTP msg for ~p: ~p", [Url,Other]),
+            ?LOG_ERROR(#{
+                text => <<"Unexpected HTTP message">>,
+                in => s3filez,
+                result => error,
+                reason => Other,
+                url => Url
+            }),
             call_fun(Fun, {error, Other}),
             {error, Other}
     after ?TIMEOUT ->
@@ -343,12 +363,20 @@ request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
             end).
 
 
-opts( Host ) ->
+opts(Host) ->
     [
         {connect_timeout, ?CONNECT_TIMEOUT},
-        {ssl, tls_certificate_check:options(Host)},
+        {ssl, ssl_options(Host)},
         {timeout, ?TIMEOUT}
     ].
+
+ssl_options(Host) ->
+    case z_ip_address:is_local_name(Host) of
+        true ->
+            [ {verify, verify_none} ];
+        false ->
+            tls_certificate_check:options(Host)
+    end.
 
 sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
     ResourcePrefix =

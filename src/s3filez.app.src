@@ -12,6 +12,8 @@
                   ssl,
                   inets,
                   jobs,
+                  gproc,
+                  zotonic_stdlib,
                   tls_certificate_check
                  ]},
   {env, [

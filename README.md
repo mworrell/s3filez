@@ -1,5 +1,4 @@
 [![Test](https://github.com/mworrell/s3filez/workflows/Test/badge.svg)](https://github.com/mworrell/s3filez/actions)
-
 [![Hex.pm Version](https://img.shields.io/hexpm/v/s3filez.svg)](https://hex.pm/packages/s3filez)
 [![Hex.pm Downloads](https://img.shields.io/hexpm/dt/s3filez.svg)](https://hex.pm/packages/s3filez)
 
@@ -32,9 +31,10 @@ Eshell V11.1  (abort with ^G)
 {ok,[jobs,s3filez]}
 2> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
 {<<"your-aws-key">>, <<"your-aws-secret">>}
-3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}).
+3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, "LICENSE"}).
 ok
 4> s3filez:stream(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(X) -> io:format("!! ~p~n", [X]) end).
+!! stream_start
 !! {content_type,<<"binary/octet-stream">>}
 !! <<"\n    Apache License\n", ...>>
 !! eof
@@ -54,7 +54,7 @@ The `stream` command can’t be queued: it is already running asynchronously.
 Example:
 
 ```erlang
-6> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, fun(ReqId,Result) -> nop end).
+6> {ok, ReqId, JobPid} = s3filez:queue_put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, 10175, "LICENSE"}, fun(ReqId, Result) -> nop end).
 {ok,#Ref<0.0.0.3684>,<0.854.0>}
 ```
 
