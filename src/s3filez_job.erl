@@ -73,6 +73,8 @@ on_ready(JobId, Result, {M,F,A}) ->
     erlang:apply(M, F, A++[JobId, Result]);
 on_ready(JobId, Result, Fun) when is_function(Fun,2) ->
     Fun(JobId, Result);
+on_ready(_JobId, Result, Fun) when is_function(Fun,1) ->
+    Fun(Result);
 on_ready(JobId, Result, Pid) when is_pid(Pid) ->
     Pid ! {s3filez_done, JobId, Result}.
 

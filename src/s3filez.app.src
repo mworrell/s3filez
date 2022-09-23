@@ -12,6 +12,7 @@
                   ssl,
                   inets,
                   jobs,
+                  gproc,
                   tls_certificate_check
                  ]},
   {env, [
