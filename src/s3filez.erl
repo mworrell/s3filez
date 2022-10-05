@@ -228,7 +228,7 @@ opts_to_headers(Opts) ->
            fun({acl, AclOption}, Hs) ->
                    [{"x-amz-acl", encode_acl(AclOption)} | Hs];
               ({content_type, CT}, Hs) ->
-                   [{"Content-Type", CT} | Hs];
+                   [{"Content-Type", to_list(CT)} | Hs];
               (Unknown, _) ->
                    throw({error, {unknown_option, Unknown}})
            end,
@@ -449,3 +449,6 @@ urlsplit_hostpath(HP) ->
 
 urlsplit_path([Path]) -> <<"/", Path/binary>>;
 urlsplit_path([Path, _]) -> <<"/", Path/binary>>.
+
+to_list(B) when is_binary(B) -> binary_to_list(B);
+to_list(L) when is_list(L) -> L.
