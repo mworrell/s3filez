@@ -1,9 +1,10 @@
+%% @author Marc Worrell
+%% @copyright 2013-2025 Marc Worrell
 %% @doc S3 file storage. Can put, get and stream files from S3 compatible services.
 %% Uses a job queue which is regulated by "jobs".
-%% @author Marc Worrell
-%% @copyright 2013-2021 Marc Worrell
+%% @end
 
-%% Copyright 2013-2021 Marc Worrell
+%% Copyright 2013-2025 Marc Worrell
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -57,7 +58,11 @@
 -define(CONNECT_TIMEOUT, 60000).    % 60s
 -define(TIMEOUT, 1800000).          % 30m
 
--type config() :: {binary(), binary()}.
+-type config() :: #{
+        username := binary() | string(),
+        password := binary() | string(),
+        tls_options => list()
+    }.
 -type url() :: binary().
 -type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
 -type stream_fun() :: {atom(),atom(),list()} | fun() | pid().
@@ -332,7 +337,7 @@ http_status({{_,Code,_}, _Headers, _Body}) ->
     {error, Code}.
 
 
-request({Key,_} = Config, Method, Url, Headers, Options) ->
+request(#{ username := Key } = Config, Method, Url, Headers, Options) ->
     {_Scheme, Host, Path} = urlsplit(Url),
     Date = httpd_util:rfc1123_date(),
     Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
@@ -341,10 +346,10 @@ request({Key,_} = Config, Method, Url, Headers, Options) ->
         {"Date", Date} | Headers
     ],
     httpc:request(Method, {binary_to_list(Url), AllHeaders},
-                  opts(Host), [{body_format, binary}|Options],
+                  opts(Host, Config), [{body_format, binary}|Options],
                   httpc_s3filez_profile).
 
-request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
+request_with_body(#{ username := Key } = Config, Method, Url, Headers, Body) ->
     {_Scheme, Host, Path} = urlsplit(Url),
     {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
     {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
@@ -358,19 +363,21 @@ request_with_body({Key,_} = Config, Method, Url, Headers, Body) ->
     jobs:run(s3filez_jobs,
              fun() ->
                 httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
-                              opts(Host), [],
+                              opts(Host, Config), [],
                               httpc_s3filez_profile)
             end).
 
 
-opts(Host) ->
+opts(Host, Config) ->
     [
         {connect_timeout, ?CONNECT_TIMEOUT},
-        {ssl, ssl_options(Host)},
+        {ssl, tls_options(Host, Config)},
         {timeout, ?TIMEOUT}
     ].
 
-ssl_options(Host) ->
+tls_options(_Host, #{ tls_options := Opts }) when is_list(Opts), Opts =/= [] ->
+    Opts;
+tls_options(Host, _Config) ->
     case z_ip_address:is_local_name(Host) of
         true ->
             [ {verify, verify_none} ];
@@ -378,7 +385,7 @@ ssl_options(Host) ->
             tls_certificate_check:options(Host)
     end.
 
-sign({_Key,Secret}, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
+sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
     ResourcePrefix =
         case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of
             [<<"com">>, <<"amazonaws">> | _] ->

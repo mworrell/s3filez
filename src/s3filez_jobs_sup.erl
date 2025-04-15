@@ -1,8 +1,9 @@
-%% @doc Supervisor for all s3 async queued jobs.
 %% @author Marc Worrell
-%% @copyright 2013-2020 Marc Worrell
+%% @copyright 2013-2025 Marc Worrell
+%% @doc Supervisor for all s3 async queued jobs.
+%% @end
 
-%% Copyright 2013-2020 Marc Worrell
+%% Copyright 2013-2025 Marc Worrell
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.

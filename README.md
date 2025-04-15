@@ -29,7 +29,7 @@ Erlang/OTP 23 [erts-11.1] [source] [64-bit] [smp:12:12] [ds:12:12:10] [async-thr
 Eshell V11.1  (abort with ^G)
 1> application:ensure_all_started(s3filez).
 {ok,[jobs,s3filez]}
-2> Cfg = {<<"your-aws-key">>, <<"your-aws-secret">>}.
+2> Cfg = #{ username => <<"your-aws-key">>, password => <<"your-aws-secret">> }.
 {<<"your-aws-key">>, <<"your-aws-secret">>}
 3> s3filez:put(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>, {filename, "LICENSE"}).
 ok
