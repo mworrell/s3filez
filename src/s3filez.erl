@@ -54,16 +54,6 @@
 
 -include_lib("kernel/include/logger.hrl").
 
--ifdef(TEST).
--export([
-    v4_required_config/1,
-    canonical_headers/1,
-    canonical_query_string/1,
-    v4_string_to_sign/4,
-    v4_signature/3,
-    v4_authorization/4
-]).
--endif.
 
 -define(BLOCK_SIZE, 65536).
 -define(CONNECT_TIMEOUT, 60000).    % 60s
@@ -488,25 +478,11 @@ signature_version(Config) ->
     maps:get(signature_version, Config, v2).
 
 request_v4(Config, Method, Url, Host, Path, Query, Headers, Options) ->
-    case v4_required_config(Config) of
+    case s3filez_sigv4:required_config(Config) of
         ok ->
-            AmzDate = amz_date(),
-            DateStamp = lists:sublist(AmzDate, 8),
-            PayloadHash = sha256_hex(<<>>),
-            AllHeaders = v4_headers(Host, AmzDate, PayloadHash, Headers, Config),
-            {CanonicalHeaders, SignedHeaders} = canonical_headers(AllHeaders),
-            CanonicalQuery = canonical_query_string(Query),
-            CanonicalRequest = iolist_to_binary([
-                method_string(Method), $\n,
-                canonical_uri(Path), $\n,
-                CanonicalQuery, $\n,
-                CanonicalHeaders, $\n,
-                SignedHeaders, $\n,
-                PayloadHash
-            ]),
-            StringToSign = v4_string_to_sign(Config, AmzDate, DateStamp, CanonicalRequest),
-            Signature = v4_signature(Config, DateStamp, StringToSign),
-            Authorization = v4_authorization(Config, DateStamp, SignedHeaders, Signature),
+            PayloadHash = s3filez_sigv4:payload_hash(<<>>),
+            {Authorization, AllHeaders} =
+                s3filez_sigv4:build_request(Config, Method, Host, Path, Query, Headers, PayloadHash),
             FinalHeaders = [
                 {"Authorization", Authorization}
                 | AllHeaders
@@ -519,26 +495,12 @@ request_v4(Config, Method, Url, Host, Path, Query, Headers, Options) ->
     end.
 
 request_with_body_v4(Config, Method, Url, Host, Path, Query, Headers, Body) ->
-    case v4_required_config(Config) of
+    case s3filez_sigv4:required_config(Config) of
         ok ->
             {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
-            PayloadHash = v4_payload_hash(Body),
-            AmzDate = amz_date(),
-            DateStamp = lists:sublist(AmzDate, 8),
-            AllHeaders = v4_headers(Host, AmzDate, PayloadHash, Headers, Config),
-            {CanonicalHeaders, SignedHeaders} = canonical_headers(AllHeaders),
-            CanonicalQuery = canonical_query_string(Query),
-            CanonicalRequest = iolist_to_binary([
-                method_string(Method), $\n,
-                canonical_uri(Path), $\n,
-                CanonicalQuery, $\n,
-                CanonicalHeaders, $\n,
-                SignedHeaders, $\n,
-                PayloadHash
-            ]),
-            StringToSign = v4_string_to_sign(Config, AmzDate, DateStamp, CanonicalRequest),
-            Signature = v4_signature(Config, DateStamp, StringToSign),
-            Authorization = v4_authorization(Config, DateStamp, SignedHeaders, Signature),
+            PayloadHash = s3filez_sigv4:payload_hash(Body),
+            {Authorization, AllHeaders} =
+                s3filez_sigv4:build_request(Config, Method, Host, Path, Query, Headers, PayloadHash),
             Hs1 = [
                 {"Authorization", Authorization}
                 | AllHeaders
@@ -552,157 +514,3 @@ request_with_body_v4(Config, Method, Url, Host, Path, Query, Headers, Body) ->
         {error, _} = Error ->
             Error
     end.
-
-v4_required_config(Config) ->
-    case maps:get(region, Config, undefined) of
-        undefined -> {error, region_needed};
-        _ -> ok
-    end.
-
-amz_date() ->
-    {{Y,M,D},{H,Mi,S}} = calendar:universal_time(),
-    lists:flatten(io_lib:format("~4..0B~2..0B~2..0BT~2..0B~2..0B~2..0BZ", [Y,M,D,H,Mi,S])).
-
-v4_headers(Host, AmzDate, PayloadHash, Headers, Config) ->
-    Base = [
-        {"Host", to_list(Host)},
-        {"x-amz-date", AmzDate},
-        {"x-amz-content-sha256", PayloadHash}
-        | Headers
-    ],
-    case maps:get(session_token, Config, undefined) of
-        undefined -> Base;
-        Token -> [{"x-amz-security-token", to_list(Token)} | Base]
-    end.
-
-canonical_headers(Headers) ->
-    Normalized = [ normalize_header(H, V) || {H, V} <- Headers ],
-    Combined = combine_headers(Normalized),
-    Sorted = lists:sort(Combined),
-    Canonical = [
-        [Name, $:, Value, $\n]
-        || {Name, Value} <- Sorted
-    ],
-    Signed = string:join([Name || {Name, _} <- Sorted], ";"),
-    {iolist_to_binary(Canonical), Signed}.
-
-normalize_header(H, V) ->
-    Name = string:lowercase(to_list(H)),
-    Value = normalize_header_value(to_list(V)),
-    {Name, Value}.
-
-normalize_header_value(Value) ->
-    Trimmed = string:trim(Value),
-    re:replace(Trimmed, "\\s+", " ", [global, {return, list}]).
-
-combine_headers(Headers) ->
-    lists:foldl(
-      fun({Name, Value}, Acc) ->
-              case lists:keyfind(Name, 1, Acc) of
-                  {Name, Existing} ->
-                      lists:keyreplace(Name, 1, Acc, {Name, Existing ++ "," ++ Value});
-                  false ->
-                      [{Name, Value} | Acc]
-              end
-      end, [], Headers).
-
-canonical_query_string(<<>>) ->
-    "";
-canonical_query_string(Query) ->
-    Parts = binary:split(Query, <<"&">>, [global]),
-    Pairs = [
-        case binary:split(P, <<"=">>) of
-            [K, V] -> {uri_encode(K), uri_encode(V)};
-            [K] -> {uri_encode(K), <<>>}
-        end
-        || P <- Parts, P =/= <<>>
-    ],
-    Sorted = lists:sort(Pairs),
-    Joined = lists:flatten(
-        string:join(
-            [binary_to_list(K) ++ "=" ++ binary_to_list(V) || {K, V} <- Sorted],
-            "&"
-        )
-    ),
-    Joined.
-
-canonical_uri(Path) ->
-    uri_encode_path(Path).
-
-uri_encode_path(Path) ->
-    %% Preserve '/' in paths, encode other bytes
-    Parts = binary:split(Path, <<"/">>, [global]),
-    Encoded = [uri_encode(P) || P <- Parts],
-    iolist_to_binary(string:join([binary_to_list(P) || P <- Encoded], "/")).
-
-uri_encode(Bin) when is_binary(Bin) ->
-    uri_encode(binary_to_list(Bin));
-uri_encode(List) when is_list(List) ->
-    iolist_to_binary([encode_byte(C) || C <- List]).
-
-encode_byte(C) when
-        (C >= $A andalso C =< $Z) orelse
-        (C >= $a andalso C =< $z) orelse
-        (C >= $0 andalso C =< $9) orelse
-        C =:= $-; C =:= $_; C =:= $.; C =:= $~ ->
-    [C];
-encode_byte(C) ->
-    io_lib:format("%~2.16.0B", [C]).
-
-v4_payload_hash(Body) when is_binary(Body) ->
-    sha256_hex(Body);
-v4_payload_hash({Fun, {file, Filename}}) when is_function(Fun, 1) ->
-    bin_to_hex(checksum_sha256(Filename));
-v4_payload_hash(_Body) ->
-    "UNSIGNED-PAYLOAD".
-
-sha256_hex(Bin) ->
-    bin_to_hex(crypto:hash(sha256, Bin)).
-
-bin_to_hex(Bin) ->
-    lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Bin]).
-
-checksum_sha256(Filename) ->
-    Ctx = crypto:hash_init(sha256),
-    {ok, FD} = file:open(Filename, [read,binary]),
-    Ctx1 = checksum_sha256_1(Ctx, FD),
-    file:close(FD),
-    crypto:hash_final(Ctx1).
-
-checksum_sha256_1(Ctx, FD) ->
-    case file:read(FD, ?BLOCK_SIZE) of
-        eof ->
-            Ctx;
-        {ok, Data} ->
-            checksum_sha256_1(crypto:hash_update(Ctx, Data), FD)
-    end.
-
-v4_string_to_sign(Config, AmzDate, DateStamp, CanonicalRequest) ->
-    Region = to_list(maps:get(region, Config)),
-    Scope = string:join([DateStamp, Region, "s3", "aws4_request"], "/"),
-    CanonicalHash = bin_to_hex(crypto:hash(sha256, CanonicalRequest)),
-    iolist_to_binary([
-        "AWS4-HMAC-SHA256\n",
-        AmzDate, "\n",
-        Scope, "\n",
-        CanonicalHash
-    ]).
-
-v4_signature(Config, DateStamp, StringToSign) ->
-    Region = to_list(maps:get(region, Config)),
-    Secret = to_list(maps:get(password, Config)),
-    KDate = crypto:mac(hmac, sha256, "AWS4" ++ Secret, DateStamp),
-    KRegion = crypto:mac(hmac, sha256, KDate, Region),
-    KService = crypto:mac(hmac, sha256, KRegion, "s3"),
-    KSigning = crypto:mac(hmac, sha256, KService, "aws4_request"),
-    bin_to_hex(crypto:mac(hmac, sha256, KSigning, StringToSign)).
-
-v4_authorization(Config, DateStamp, SignedHeaders, Signature) ->
-    Key = to_list(maps:get(username, Config)),
-    Region = to_list(maps:get(region, Config)),
-    Scope = string:join([DateStamp, Region, "s3", "aws4_request"], "/"),
-    lists:flatten([
-        "AWS4-HMAC-SHA256 Credential=", Key, "/", Scope,
-        ",SignedHeaders=", SignedHeaders,
-        ",Signature=", Signature
-    ]).
