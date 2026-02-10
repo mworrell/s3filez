@@ -354,7 +354,7 @@ request(#{ username := Key } = Config, Method, Url, Headers, Options) ->
             request_v4(Config, Method, Url, Host, Path, Query, Headers, Options);
         v2 ->
             Date = httpd_util:rfc1123_date(),
-            Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
+            Signature = s3filez_sigv2:sign(Config, Method, "", "", Date, Headers, Host, Path),
             AllHeaders = [
                 {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date} | Headers
@@ -373,7 +373,7 @@ request_with_body(#{ username := Key } = Config, Method, Url, Headers, Body) ->
             {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
             {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
             Date = httpd_util:rfc1123_date(),
-            Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
+            Signature = s3filez_sigv2:sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
             Hs1 = [
                 {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date}
@@ -405,36 +405,7 @@ tls_options(Host, _Config) ->
             tls_certificate_check:options(Host)
     end.
 
-sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
-    ResourcePrefix =
-        case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of
-            [<<"com">>, <<"amazonaws">> | _] ->
-                ["/", hd(Split)];
-            _ ->
-                []
-        end,
-    Data = [
-            method_string(Method), $\n,
-            BodyMD5, $\n,
-            ContentType, $\n,
-            Date, $\n,
-            canonicalize_amz_headers(Headers),
-            iolist_to_binary([ResourcePrefix, Path])
-           ],
-    base64:encode(crypto:mac(hmac, sha, Secret, Data)).
 
-method_string('put') -> "PUT";
-method_string('get') -> "GET";
-method_string('delete') -> "DELETE".
-
-canonicalize_amz_headers(Headers) ->
-    AmzHeaders = lists:sort(lists:filter(fun({"x-amz-" ++ _, _}) -> true; (_) -> false end, Headers)),
-    [
-     [
-      H, $:, V, $\n
-     ]
-     || {H, V} <- AmzHeaders
-    ].
 
 ct(Headers) ->
     list_to_binary(proplists:get_value("content-type", Headers, "binary/octet-stream")).
@@ -480,12 +451,12 @@ urlsplit(Url) ->
         case {Host0, Port} of
             {<<>>, _} ->
                 <<>>;
-            {H, undefined} ->
-                H;
-            {H, P} when is_integer(P), P =:= DefaultPort ->
-                H;
-            {H, P} when is_integer(P) ->
-                <<H/binary, $:, (integer_to_binary(P))/binary>>
+            {HostBin, undefined} ->
+                HostBin;
+            {HostBin, PortInt} when is_integer(PortInt), PortInt =:= DefaultPort ->
+                HostBin;
+            {HostBin, PortInt} when is_integer(PortInt) ->
+                <<HostBin/binary, $:, (integer_to_binary(PortInt))/binary>>
         end,
     Path0 = maps:get(path, Parts, []),
     Path =
