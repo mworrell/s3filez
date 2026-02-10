@@ -464,10 +464,28 @@ urlsplit(Url) ->
             undefined -> no_scheme;
             S -> list_to_binary(S)
         end,
-    Host =
+    Host0 =
         case maps:get(host, Parts, undefined) of
             undefined -> <<>>;
             H -> list_to_binary(H)
+        end,
+    Port = maps:get(port, Parts, undefined),
+    DefaultPort =
+        case Scheme of
+            <<"http">>  -> 80;
+            <<"https">> -> 443;
+            _           -> undefined
+        end,
+    Host =
+        case {Host0, Port} of
+            {<<>>, _} ->
+                <<>>;
+            {H, undefined} ->
+                H;
+            {H, P} when is_integer(P), P =:= DefaultPort ->
+                H;
+            {H, P} when is_integer(P) ->
+                <<H/binary, $:, (integer_to_binary(P))/binary>>
         end,
     Path0 = maps:get(path, Parts, []),
     Path =
