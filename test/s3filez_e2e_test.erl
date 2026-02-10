@@ -32,7 +32,7 @@ e2e_put_get_delete_test() ->
             {skip, Reason};
         {Pid, Port} ->
     try
-        [ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+        [{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
         Cfg = #{
             username => <<"test-access">>,
             password => <<"test-secret">>
@@ -53,7 +53,7 @@ e2e_put_get_delete_v4_test() ->
             {skip, Reason};
         {Pid, Port} ->
     try
-        [ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+        [{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
         Cfg = #{
             username => <<"test-access">>,
             password => <<"test-secret">>,
@@ -76,7 +76,7 @@ e2e_get_missing_region_v4_test() ->
             {skip, Reason};
         {Pid, Port} ->
             try
-                [ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+                [{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
                 Cfg = #{
                     username => <<"test-access">>,
                     password => <<"test-secret">>,
@@ -95,7 +95,7 @@ e2e_get_invalid_credentials_v4_test() ->
             {skip, Reason};
         {Pid, Port} ->
             try
-                [ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+                [{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
                 Cfg = #{
                     username => <<"wrong-access">>,
                     password => <<"wrong-secret">>,
@@ -115,7 +115,7 @@ e2e_get_invalid_credentials_v2_test() ->
             {skip, Reason};
         {Pid, Port} ->
             try
-                [ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+                [{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
                 Cfg = #{
                     username => <<"wrong-access">>,
                     password => <<"wrong-secret">>
@@ -131,7 +131,7 @@ start_server() ->
     case gen_tcp:listen(0, [binary, {packet, raw}, {active, false}, {reuseaddr, true}]) of
         {ok, LSock} ->
             {ok, {_, Port}} = inet:sockname(LSock),
-            Table = ets:new(?MODULE, [set, private]),
+            Table = ets:new(?MODULE, [set, public]),
             Pid = spawn_link(fun() -> accept_loop(LSock, Table) end),
             {Pid, Port};
         {error, Reason} ->
@@ -211,7 +211,7 @@ parse_headers([<<>> | _], Acc) ->
 parse_headers([Line | Rest], Acc) ->
     case split_header(Line) of
         {Key, Val} ->
-            parse_headers(Rest, [{string:lowercase(binary_to_list(Key)), binary:trim(Val, leading, <<" ">>)} | Acc]);
+            parse_headers(Rest, [{string:lowercase(binary_to_list(Key)), z_string:trim(Val)} | Acc]);
         error ->
             parse_headers(Rest, Acc)
     end.

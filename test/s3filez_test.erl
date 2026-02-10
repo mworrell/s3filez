@@ -67,7 +67,7 @@ s3_config_adjust_url( URL ) ->
 
 s3_get( nos3 ) -> skip;
 s3_get( #{s3_bucket := B, s3_config := Cfg, s3_url := U} ) ->
-	[ok = application:ensure_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, tls_certificate_check, s3filez]],
+	[{ok, _} = application:ensure_all_started(X) || X <- [crypto, public_key, ssl, ssl_verify_fun, inets, jobs, gproc, tls_certificate_check, s3filez]],
 
 	Result = s3filez:get( Cfg, list_to_binary([U, B]) ),
 
