@@ -86,7 +86,7 @@
 
 -type queue_reply() :: {ok, any(), pid()} | {error, {already_started, pid()}}.
 
--type sync_reply() :: ok | {error, enoent | forbidden | http_code()}.
+-type sync_reply() :: ok | {error, enoent | forbidden | http_code() | region_needed}.
 -type http_code() :: 100..600.
 
 -type put_opts() :: [ put_opt() ].
@@ -169,7 +169,7 @@ queue_stream_id(JobId, Config, Url, StreamFun) ->
 %% @doc Fetch the data at the url.
 -spec get( config(), url() ) ->
       {ok, ContentType::binary(), Data::binary()}
-    | {error, enoent | forbidden | http_code()}.
+    | {error, enoent | forbidden | http_code() | region_needed}.
 get(Config, Url) ->
     Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, [], []) end),
     case Result of
@@ -360,7 +360,7 @@ request(#{ username := Key } = Config, Method, Url, Headers, Options) ->
             Date = httpd_util:rfc1123_date(),
             Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
             AllHeaders = [
-                {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
+                {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date} | Headers
             ],
             httpc:request(Method, {binary_to_list(Url), AllHeaders},
@@ -379,7 +379,7 @@ request_with_body(#{ username := Key } = Config, Method, Url, Headers, Body) ->
             Date = httpd_util:rfc1123_date(),
             Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
             Hs1 = [
-                {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
+                {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date}
                 | Headers
             ],

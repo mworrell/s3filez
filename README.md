@@ -60,6 +60,7 @@ Signature V4 example
 ```
 
 Signature V2 is the default if `signature_version` is not set.
+When using Signature V4, `region` must be set; otherwise calls return `{error, region_needed}`.
 
 Request Queue
 -------------
