@@ -270,29 +270,35 @@ stream(Config, Url, HttpcStreamOption) ->
     request(Config, get, Url, [], [{stream,HttpcStreamOption}, {sync,false}]).
 
 stream_to_fun(Config, Url, Fun) ->
-    {ok, RequestId} = request(Config, get, Url, [], [{stream,{self,once}}, {sync,false}]),
-    receive
-        {http, {RequestId, stream_start, Headers, Pid}} ->
-            call_fun(Fun, stream_start),
-            call_fun(Fun, {content_type, ct(Headers)}),
-            httpc:stream_next(Pid),
-            ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
-        {http, {RequestId, {_,_,_} = HttpRet}}->
-            Status = http_status(HttpRet),
-            call_fun(Fun, Status),
-            Status;
-        {http, {RequestId, Other}} ->
-            ?LOG_ERROR(#{
-                text => <<"Unexpected HTTP message">>,
-                in => s3filez,
-                result => error,
-                reason => Other,
-                url => Url
-            }),
-            {error, Other}
-    after ?CONNECT_TIMEOUT ->
-        call_fun(Fun, {error, timeout}),
-        {error, timeout}
+    case request(Config, get, Url, [], [{stream,{self,once}}, {sync,false}]) of
+        {ok, RequestId} ->
+            receive
+                {http, {RequestId, stream_start, Headers, Pid}} ->
+                    call_fun(Fun, stream_start),
+                    call_fun(Fun, {content_type, ct(Headers)}),
+                    httpc:stream_next(Pid),
+                    ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
+                {http, {RequestId, {_,_,_} = HttpRet}}->
+                    Status = http_status(HttpRet),
+                    call_fun(Fun, Status),
+                    Status;
+                {http, {RequestId, Other}} ->
+                    ?LOG_ERROR(#{
+                        text => <<"Unexpected HTTP message">>,
+                        in => s3filez,
+                        result => error,
+                        reason => Other,
+                        url => Url
+                    }),
+                    call_fun(Fun, {error, Other}),
+                    {error, Other}
+            after ?CONNECT_TIMEOUT ->
+                call_fun(Fun, {error, timeout}),
+                {error, timeout}
+            end;
+        {error, _} = Error ->
+            call_fun(Fun, Error),
+            Error
     end.
 
 %% @private
@@ -451,25 +457,32 @@ checksum1(Ctx, FD) ->
 
 
 urlsplit(Url) ->
-    case binary:split(Url, <<":">>) of
-        [Scheme, <<"//", HostPath/binary>>] ->
-            {Host,Path,Query} = urlsplit_hostpath(HostPath),
-            {Scheme, Host, Path, Query};
-        [<<"//", HostPath/binary>>] ->
-            {Host,Path,Query} = urlsplit_hostpath(HostPath),
-            {no_scheme, Host, Path, Query};
-        [Path] ->
-            {no_scheme, <<>>, Path, <<>>}
-    end.
-
-urlsplit_hostpath(HP) ->
-    case binary:split(HP, <<"/">>) of
-        [Host,Path] -> {Path1,Query} = urlsplit_path(binary:split(Path, <<"?">>)), {Host, Path1, Query};
-        [Host] -> {Host, <<"/">>, <<>>}
-    end.
-
-urlsplit_path([Path]) -> {<<"/", Path/binary>>, <<>>};
-urlsplit_path([Path, Query]) -> {<<"/", Path/binary>>, Query}.
+    UrlString = to_list(Url),
+    Parts = uri_string:parse(UrlString),
+    Scheme =
+        case maps:get(scheme, Parts, undefined) of
+            undefined -> no_scheme;
+            S -> list_to_binary(S)
+        end,
+    Host =
+        case maps:get(host, Parts, undefined) of
+            undefined -> <<>>;
+            H -> list_to_binary(H)
+        end,
+    Path0 = maps:get(path, Parts, []),
+    Path =
+        case Path0 of
+            [] when Host =/= <<>> -> <<"/">>;
+            [] -> <<>>;
+            _ when is_list(Path0) -> list_to_binary(Path0);
+            _ when is_binary(Path0) -> Path0
+        end,
+    Query =
+        case maps:get(query, Parts, undefined) of
+            undefined -> <<>>;
+            Q -> list_to_binary(Q)
+        end,
+    {Scheme, Host, Path, Query}.
 
 to_list(B) when is_binary(B) -> binary_to_list(B);
 to_list(L) when is_list(L) -> L.
