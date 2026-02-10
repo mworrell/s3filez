@@ -32,26 +32,35 @@
 
 -record(state, {job_id, cmd}).
 
+-type state() :: #state{}.
+
+-spec start_link(term(), term()) -> {ok, pid()} | {error, term()}.
 start_link(JobId, Cmd) ->
     gen_server:start_link({via, gproc, {n,l,{s3filez_job,JobId}}}, ?MODULE, [JobId, Cmd], []).
 
+-spec init([term()]) -> {ok, state()}.
 init([JobId, Cmd]) ->
     gen_server:cast(self(), run),
     {ok, #state{job_id=JobId, cmd=Cmd}}.
 
+-spec handle_call(term(), {pid(), term()}, state()) -> {reply, term(), state()}.
 handle_call(Msg, _From, State) ->
     {reply, {unknown_msg, Msg}, State}.
 
+-spec handle_cast(term(), state()) -> {stop, normal, state()} | {noreply, state()}.
 handle_cast(run, #state{cmd=Cmd, job_id=JobId} = State) ->
     do_cmd(JobId, Cmd),
     {stop, normal, State}.
 
+-spec handle_info(term(), state()) -> {noreply, state()}.
 handle_info(_Info, State) ->
     {noreply, State}.
 
+-spec code_change(term(), state(), term()) -> {ok, state()}.
 code_change(_OldVersion, State, _Extra) ->
     {ok, State}.
 
+-spec terminate(term(), state()) -> ok.
 terminate(_Reason, _State) ->
     ok.
 
@@ -78,5 +87,4 @@ on_ready(_JobId, Result, Fun) when is_function(Fun,1) ->
     Fun(Result);
 on_ready(JobId, Result, Pid) when is_pid(Pid) ->
     Pid ! {s3filez_done, JobId, Result}.
-
 

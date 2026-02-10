@@ -35,18 +35,23 @@
     authorization/4
 ]).
 
+-type header() :: {string() | binary(), string() | binary()}.
+
 -define(BLOCK_SIZE, 65536).
 
+-spec required_config(map()) -> ok | {error, region_needed}.
 required_config(Config) ->
     case maps:get(region, Config, undefined) of
         undefined -> {error, region_needed};
         _ -> ok
     end.
 
+-spec amz_date() -> string().
 amz_date() ->
     {{Y,M,D},{H,Mi,S}} = calendar:universal_time(),
     lists:flatten(io_lib:format("~4..0B~2..0B~2..0BT~2..0B~2..0B~2..0BZ", [Y,M,D,H,Mi,S])).
 
+-spec headers(binary() | string(), string(), string(), [header()], map()) -> [header()].
 headers(Host, AmzDate, PayloadHash, Headers, Config) ->
     Base = [
         {"Host", to_list(Host)},
@@ -59,6 +64,7 @@ headers(Host, AmzDate, PayloadHash, Headers, Config) ->
         Token -> [{"x-amz-security-token", to_list(Token)} | Base]
     end.
 
+-spec canonical_headers([header()]) -> {binary(), string()}.
 canonical_headers(Headers) ->
     Normalized = [ normalize_header(H, V) || {H, V} <- Headers ],
     Combined = combine_headers(Normalized),
@@ -70,6 +76,7 @@ canonical_headers(Headers) ->
     Signed = string:join([Name || {Name, _} <- Sorted], ";"),
     {iolist_to_binary(Canonical), Signed}.
 
+-spec canonical_query_string(binary()) -> string().
 canonical_query_string(<<>>) ->
     "";
 canonical_query_string(Query) ->
@@ -90,9 +97,19 @@ canonical_query_string(Query) ->
     ),
     Joined.
 
+-spec canonical_uri(binary()) -> binary().
 canonical_uri(Path) ->
     uri_encode_path(Path).
 
+-spec build_request(
+    map(),
+    atom(),
+    binary(),
+    binary(),
+    binary(),
+    [header()],
+    string()
+) -> {string(), [header()]}.
 build_request(Config, Method, Host, Path, Query, Headers, PayloadHash) ->
     AmzDate = amz_date(),
     DateStamp = lists:sublist(AmzDate, 8),
@@ -112,6 +129,7 @@ build_request(Config, Method, Host, Path, Query, Headers, PayloadHash) ->
     Authorization = authorization(Config, DateStamp, SignedHeaders, Signature),
     {Authorization, AllHeaders}.
 
+-spec payload_hash(term()) -> string().
 payload_hash(Body) when is_binary(Body) ->
     sha256_hex(Body);
 payload_hash({Fun, {file, Filename}}) when is_function(Fun, 1) ->
@@ -119,6 +137,7 @@ payload_hash({Fun, {file, Filename}}) when is_function(Fun, 1) ->
 payload_hash(_Body) ->
     "UNSIGNED-PAYLOAD".
 
+-spec string_to_sign(map(), string(), string(), binary()) -> binary().
 string_to_sign(Config, AmzDate, DateStamp, CanonicalRequest) ->
     Region = to_list(maps:get(region, Config)),
     Scope = string:join([DateStamp, Region, "s3", "aws4_request"], "/"),
@@ -130,6 +149,7 @@ string_to_sign(Config, AmzDate, DateStamp, CanonicalRequest) ->
         CanonicalHash
     ]).
 
+-spec signature(map(), string(), binary()) -> string().
 signature(Config, DateStamp, StringToSign) ->
     Region = to_list(maps:get(region, Config)),
     Secret = to_list(maps:get(password, Config)),
@@ -139,6 +159,7 @@ signature(Config, DateStamp, StringToSign) ->
     KSigning = crypto:mac(hmac, sha256, KService, "aws4_request"),
     bin_to_hex(crypto:mac(hmac, sha256, KSigning, StringToSign)).
 
+-spec authorization(map(), string(), string(), string()) -> string().
 authorization(Config, DateStamp, SignedHeaders, Signature) ->
     Key = to_list(maps:get(username, Config)),
     Region = to_list(maps:get(region, Config)),

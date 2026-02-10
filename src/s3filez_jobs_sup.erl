@@ -31,18 +31,22 @@
 %% Supervisor callbacks
 -export([init/1]).
 
+-spec queue(term()) -> {ok, reference(), pid()} | {error, term()}.
 queue(S3Job) ->
     queue(erlang:make_ref(), S3Job).
 
+-spec queue(reference(), term()) -> {ok, reference(), pid()} | {error, term()}.
 queue(Ref, S3Job) ->
     case supervisor:start_child(?MODULE, [Ref, S3Job]) of
         {ok, Pid} -> {ok, Ref, Pid};
         {error, {already_started, Pid}} -> {ok, Ref, Pid}
     end.
 
+-spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
+-spec init(term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     Worker = {s3filez_job, {s3filez_job, start_link, []},
               temporary, 10000, worker, [s3filez_job]},

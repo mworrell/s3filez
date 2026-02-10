@@ -26,6 +26,16 @@
     sign/8
 ]).
 
+-spec sign(
+    map(),
+    atom(),
+    iodata(),
+    iodata(),
+    iodata(),
+    list(),
+    binary(),
+    binary()
+) -> binary().
 sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
     ResourcePrefix =
         case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of

@@ -203,6 +203,8 @@ put(Config, Url, {filename, Size, Filename}, Opts) ->
     ],
     ret_status(request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}})).
 
+-spec put_body_file({file, file:filename_all()} | {fd, file:io_device()}) ->
+    eof | {ok, binary(), {fd, file:io_device()}}.
 put_body_file({file, Filename}) ->
     {ok, FD} = file:open(Filename, [read,binary]),
     put_body_file({fd, FD});
@@ -302,6 +304,7 @@ stream_to_fun(Config, Url, Fun) ->
     end.
 
 %% @private
+-spec stream_loop(reference(), pid(), url(), stream_fun()) -> ok | {error, term()}.
 stream_loop(RequestId, Pid, Url, Fun) ->
     receive
         {http, {RequestId, stream_end, Headers}} ->
