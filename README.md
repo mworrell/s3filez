@@ -16,8 +16,8 @@ Distinction with other s3 clients is:
  * get with optional streaming function, to be able to stream to the filezcache
  * simple jobs queue, using the 'jobs' scheduler
 
-Example
--------
+Example (Signature V2 default)
+------------------------------
 
 ```erlang
 rebar3 shell
@@ -42,6 +42,26 @@ ok
 ok
 ```
 
+Signature V4 example
+--------------------
+
+```erlang
+1> application:ensure_all_started(s3filez).
+{ok,[jobs,s3filez]}
+2> Cfg = #{
+       username => <<"your-aws-key">>,
+       password => <<"your-aws-secret">>,
+       signature_version => v4,
+       region => <<"eu-west-1">>
+   }.
+#{region => <<"eu-west-1">>,signature_version => v4,username => <<"your-aws-key">>,password => <<"your-aws-secret">>}
+3> s3filez:get(Cfg, <<"https://your-bucket.s3-eu-west-1.amazonaws.com/LICENSE">>).
+{ok,<<"binary/octet-stream">>,_}
+```
+
+Signature V2 is the default if `signature_version` is not set.
+When using Signature V4, `region` must be set; otherwise calls return `{error, region_needed}`.
+
 Request Queue
 -------------
 
@@ -62,4 +82,3 @@ The returned `JobPid` is the pid of the process in the s3filez queue supervisor.
 The callback can be a function (arity 2), `{M,F,A}` or a pid.
 
 If the callback is a pid then it will receive the message `{s3filez_done, ReqId, Result}`.
-

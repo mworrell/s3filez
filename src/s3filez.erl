@@ -1,10 +1,10 @@
 %% @author Marc Worrell
-%% @copyright 2013-2025 Marc Worrell
+%% @copyright 2013-2026 Marc Worrell
 %% @doc S3 file storage. Can put, get and stream files from S3 compatible services.
 %% Uses a job queue which is regulated by "jobs".
 %% @end
 
-%% Copyright 2013-2025 Marc Worrell
+%% Copyright 2013-2026 Marc Worrell
 %%
 %% This file is provided to you under the Apache License,
 %% Version 2.0 (the "License"); you may not use this file
@@ -54,6 +54,7 @@
 
 -include_lib("kernel/include/logger.hrl").
 
+
 -define(BLOCK_SIZE, 65536).
 -define(CONNECT_TIMEOUT, 60000).    % 60s
 -define(TIMEOUT, 1800000).          % 30m
@@ -61,7 +62,10 @@
 -type config() :: #{
         username := binary() | string(),
         password := binary() | string(),
-        tls_options => list()
+        tls_options => list(),
+        signature_version => v2 | v4,
+        region => binary() | string(),
+        session_token => binary() | string()
     }.
 -type url() :: binary().
 -type ready_fun() :: undefined | {atom(),atom(),list()} | fun() | pid().
@@ -72,7 +76,7 @@
 
 -type queue_reply() :: {ok, any(), pid()} | {error, {already_started, pid()}}.
 
--type sync_reply() :: ok | {error, enoent | forbidden | http_code()}.
+-type sync_reply() :: ok | {error, enoent | forbidden | http_code() | region_needed}.
 -type http_code() :: 100..600.
 
 -type put_opts() :: [ put_opt() ].
@@ -155,7 +159,7 @@ queue_stream_id(JobId, Config, Url, StreamFun) ->
 %% @doc Fetch the data at the url.
 -spec get( config(), url() ) ->
       {ok, ContentType::binary(), Data::binary()}
-    | {error, enoent | forbidden | http_code()}.
+    | {error, enoent | forbidden | http_code() | region_needed}.
 get(Config, Url) ->
     Result = jobs:run(s3filez_jobs, fun() -> request(Config, get, Url, [], []) end),
     case Result of
@@ -199,6 +203,8 @@ put(Config, Url, {filename, Size, Filename}, Opts) ->
     ],
     ret_status(request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}})).
 
+-spec put_body_file({file, file:filename_all()} | {fd, file:io_device()}) ->
+    eof | {ok, binary(), {fd, file:io_device()}}.
 put_body_file({file, Filename}) ->
     {ok, FD} = file:open(Filename, [read,binary]),
     put_body_file({fd, FD});
@@ -266,32 +272,39 @@ stream(Config, Url, HttpcStreamOption) ->
     request(Config, get, Url, [], [{stream,HttpcStreamOption}, {sync,false}]).
 
 stream_to_fun(Config, Url, Fun) ->
-    {ok, RequestId} = request(Config, get, Url, [], [{stream,{self,once}}, {sync,false}]),
-    receive
-        {http, {RequestId, stream_start, Headers, Pid}} ->
-            call_fun(Fun, stream_start),
-            call_fun(Fun, {content_type, ct(Headers)}),
-            httpc:stream_next(Pid),
-            ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
-        {http, {RequestId, {_,_,_} = HttpRet}}->
-            Status = http_status(HttpRet),
-            call_fun(Fun, Status),
-            Status;
-        {http, {RequestId, Other}} ->
-            ?LOG_ERROR(#{
-                text => <<"Unexpected HTTP message">>,
-                in => s3filez,
-                result => error,
-                reason => Other,
-                url => Url
-            }),
-            {error, Other}
-    after ?CONNECT_TIMEOUT ->
-        call_fun(Fun, {error, timeout}),
-        {error, timeout}
+    case request(Config, get, Url, [], [{stream,{self,once}}, {sync,false}]) of
+        {ok, RequestId} ->
+            receive
+                {http, {RequestId, stream_start, Headers, Pid}} ->
+                    call_fun(Fun, stream_start),
+                    call_fun(Fun, {content_type, ct(Headers)}),
+                    httpc:stream_next(Pid),
+                    ?MODULE:stream_loop(RequestId, Pid, Url, Fun);
+                {http, {RequestId, {_,_,_} = HttpRet}}->
+                    Status = http_status(HttpRet),
+                    call_fun(Fun, Status),
+                    Status;
+                {http, {RequestId, Other}} ->
+                    ?LOG_ERROR(#{
+                        text => <<"Unexpected HTTP message">>,
+                        in => s3filez,
+                        result => error,
+                        reason => Other,
+                        url => Url
+                    }),
+                    call_fun(Fun, {error, Other}),
+                    {error, Other}
+            after ?CONNECT_TIMEOUT ->
+                call_fun(Fun, {error, timeout}),
+                {error, timeout}
+            end;
+        {error, _} = Error ->
+            call_fun(Fun, Error),
+            Error
     end.
 
 %% @private
+-spec stream_loop(reference(), pid(), url(), stream_fun()) -> ok | {error, term()}.
 stream_loop(RequestId, Pid, Url, Fun) ->
     receive
         {http, {RequestId, stream_end, Headers}} ->
@@ -338,34 +351,44 @@ http_status({{_,Code,_}, _Headers, _Body}) ->
 
 
 request(#{ username := Key } = Config, Method, Url, Headers, Options) ->
-    {_Scheme, Host, Path} = urlsplit(Url),
-    Date = httpd_util:rfc1123_date(),
-    Signature = sign(Config, Method, "", "", Date, Headers, Host, Path),
-    AllHeaders = [
-        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
-        {"Date", Date} | Headers
-    ],
-    httpc:request(Method, {binary_to_list(Url), AllHeaders},
-                  opts(Host, Config), [{body_format, binary}|Options],
-                  httpc_s3filez_profile).
+    {_Scheme, Host, Path, Query} = urlsplit(Url),
+    case signature_version(Config) of
+        v4 ->
+            request_v4(Config, Method, Url, Host, Path, Query, Headers, Options);
+        v2 ->
+            Date = httpd_util:rfc1123_date(),
+            Signature = s3filez_sigv2:sign(Config, Method, "", "", Date, Headers, Host, Path),
+            AllHeaders = [
+                {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
+                {"Date", Date} | Headers
+            ],
+            httpc:request(Method, {binary_to_list(Url), AllHeaders},
+                          opts(Host, Config), [{body_format, binary}|Options],
+                          httpc_s3filez_profile)
+    end.
 
 request_with_body(#{ username := Key } = Config, Method, Url, Headers, Body) ->
-    {_Scheme, Host, Path} = urlsplit(Url),
-    {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
-    {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
-    Date = httpd_util:rfc1123_date(),
-    Signature = sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
-    Hs1 = [
-        {"Authorization", lists:flatten(["AWS ",binary_to_list(Key),":",binary_to_list(Signature)])},
-        {"Date", Date}
-        | Headers
-    ],
-    jobs:run(s3filez_jobs,
-             fun() ->
-                httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
-                              opts(Host, Config), [],
-                              httpc_s3filez_profile)
-            end).
+    {_Scheme, Host, Path, Query} = urlsplit(Url),
+    case signature_version(Config) of
+        v4 ->
+            request_with_body_v4(Config, Method, Url, Host, Path, Query, Headers, Body);
+        v2 ->
+            {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
+            {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
+            Date = httpd_util:rfc1123_date(),
+            Signature = s3filez_sigv2:sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
+            Hs1 = [
+                {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
+                {"Date", Date}
+                | Headers
+            ],
+            jobs:run(s3filez_jobs,
+                     fun() ->
+                        httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
+                                      opts(Host, Config), [],
+                                      httpc_s3filez_profile)
+                    end)
+    end.
 
 
 opts(Host, Config) ->
@@ -385,41 +408,12 @@ tls_options(Host, _Config) ->
             tls_certificate_check:options(Host)
     end.
 
-sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
-    ResourcePrefix =
-        case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of
-            [<<"com">>, <<"amazonaws">> | _] ->
-                ["/", hd(Split)];
-            _ ->
-                []
-        end,
-    Data = [
-            method_string(Method), $\n,
-            BodyMD5, $\n,
-            ContentType, $\n,
-            Date, $\n,
-            canonicalize_amz_headers(Headers),
-            iolist_to_binary([ResourcePrefix, Path])
-           ],
-    base64:encode(crypto:mac(hmac, sha, Secret, Data)).
 
-method_string('put') -> "PUT";
-method_string('get') -> "GET";
-method_string('delete') -> "DELETE".
-
-canonicalize_amz_headers(Headers) ->
-    AmzHeaders = lists:sort(lists:filter(fun({"x-amz-" ++ _, _}) -> true; (_) -> false end, Headers)),
-    [
-     [
-      H, $:, V, $\n
-     ]
-     || {H, V} <- AmzHeaders
-    ].
 
 ct(Headers) ->
     list_to_binary(proplists:get_value("content-type", Headers, "binary/octet-stream")).
 
--spec checksum(file:filename()) -> binary().
+-spec checksum(file:filename_all()) -> binary().
 checksum(Filename) ->
     Ctx = crypto:hash_init(md5),
     {ok, FD} = file:open(Filename, [read,binary]),
@@ -437,25 +431,91 @@ checksum1(Ctx, FD) ->
 
 
 urlsplit(Url) ->
-    case binary:split(Url, <<":">>) of
-        [Scheme, <<"//", HostPath/binary>>] ->
-            {Host,Path} = urlsplit_hostpath(HostPath),
-            {Scheme, Host, Path};
-        [<<"//", HostPath/binary>>] ->
-            {Host,Path} = urlsplit_hostpath(HostPath),
-            {no_scheme, Host, Path};
-        [Path] ->
-            {no_scheme, <<>>, Path}
-    end.
-
-urlsplit_hostpath(HP) ->
-    case binary:split(HP, <<"/">>) of
-        [Host,Path] -> {Host,urlsplit_path(binary:split(Path, <<"?">>))};
-        [Host] -> {Host, <<"/">>}
-    end.
-
-urlsplit_path([Path]) -> <<"/", Path/binary>>;
-urlsplit_path([Path, _]) -> <<"/", Path/binary>>.
+    UrlString = to_list(Url),
+    Parts = uri_string:parse(UrlString),
+    Scheme =
+        case maps:get(scheme, Parts, undefined) of
+            undefined -> no_scheme;
+            S -> list_to_binary(S)
+        end,
+    Host0 =
+        case maps:get(host, Parts, undefined) of
+            undefined -> <<>>;
+            H -> list_to_binary(H)
+        end,
+    Port = maps:get(port, Parts, undefined),
+    DefaultPort =
+        case Scheme of
+            <<"http">>  -> 80;
+            <<"https">> -> 443;
+            _           -> undefined
+        end,
+    Host =
+        case {Host0, Port} of
+            {<<>>, _} ->
+                <<>>;
+            {HostBin, undefined} ->
+                HostBin;
+            {HostBin, PortInt} when is_integer(PortInt), PortInt =:= DefaultPort ->
+                HostBin;
+            {HostBin, PortInt} when is_integer(PortInt) ->
+                <<HostBin/binary, $:, (integer_to_binary(PortInt))/binary>>
+        end,
+    Path0 = maps:get(path, Parts, []),
+    Path =
+        case Path0 of
+            [] when Host =/= <<>> -> <<"/">>;
+            [] -> <<>>;
+            _ when is_list(Path0) -> list_to_binary(Path0);
+            _ when is_binary(Path0) -> Path0
+        end,
+    Query =
+        case maps:get(query, Parts, undefined) of
+            undefined -> <<>>;
+            Q -> list_to_binary(Q)
+        end,
+    {Scheme, Host, Path, Query}.
 
 to_list(B) when is_binary(B) -> binary_to_list(B);
 to_list(L) when is_list(L) -> L.
+
+signature_version(Config) ->
+    maps:get(signature_version, Config, v2).
+
+request_v4(Config, Method, Url, Host, Path, Query, Headers, Options) ->
+    case s3filez_sigv4:required_config(Config) of
+        ok ->
+            PayloadHash = s3filez_sigv4:payload_hash(<<>>),
+            {Authorization, AllHeaders} =
+                s3filez_sigv4:build_request(Config, Method, Host, Path, Query, Headers, PayloadHash),
+            FinalHeaders = [
+                {"Authorization", Authorization}
+                | AllHeaders
+            ],
+            httpc:request(Method, {binary_to_list(Url), FinalHeaders},
+                          opts(Host, Config), [{body_format, binary}|Options],
+                          httpc_s3filez_profile);
+        {error, _} = Error ->
+            Error
+    end.
+
+request_with_body_v4(Config, Method, Url, Host, Path, Query, Headers, Body) ->
+    case s3filez_sigv4:required_config(Config) of
+        ok ->
+            {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
+            PayloadHash = s3filez_sigv4:payload_hash(Body),
+            {Authorization, AllHeaders} =
+                s3filez_sigv4:build_request(Config, Method, Host, Path, Query, Headers, PayloadHash),
+            Hs1 = [
+                {"Authorization", Authorization}
+                | AllHeaders
+            ],
+            jobs:run(s3filez_jobs,
+                     fun() ->
+                        httpc:request(Method, {binary_to_list(Url), Hs1, ContentType, Body},
+                                      opts(Host, Config), [],
+                                      httpc_s3filez_profile)
+                    end);
+        {error, _} = Error ->
+            Error
+    end.

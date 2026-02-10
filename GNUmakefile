@@ -36,7 +36,7 @@ xref: $(REBAR)
 	$(REBAR) xref
 
 test: $(REBAR)
-	$(REBAR) $(REBAR_OPTS) ct
+	$(REBAR) $(REBAR_OPTS) eunit
 
 edoc: $(REBAR)
 	$(REBAR) edoc

@@ -4,7 +4,7 @@
 %% supervisor for the queued jobs.
 %% @end
 
-%% Copyright 2013-2025 Marc Worrell
+%% Copyright 2013-2026 Marc Worrell
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -24,6 +24,7 @@
 
 -export([start/2, stop/1]).
 
+-spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
     ensure_httpc_profile(),
     case s3filez_sup:start_link() of
@@ -34,6 +35,7 @@ start(_StartType, _StartArgs) ->
             {error, Other}
     end.
 
+-spec stop(term()) -> ok.
 stop(_State) ->
     ok.
 

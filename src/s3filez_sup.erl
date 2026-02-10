@@ -1,7 +1,7 @@
 %% @author Marc Worrell
-%% @copyright 2013-2025 Marc Worrell
+%% @copyright 2013-2026 Marc Worrell
 
-%% Copyright 2013-2025 Marc Worrell
+%% Copyright 2013-2026 Marc Worrell
 %%
 %% Licensed under the Apache License, Version 2.0 (the "License");
 %% you may not use this file except in compliance with the License.
@@ -27,13 +27,14 @@
 
 -define(SERVER, ?MODULE).
 
+-spec start_link() -> {ok, pid()} | {error, term()}.
 start_link() ->
     supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
+-spec init(term()) -> {ok, {supervisor:sup_flags(), [supervisor:child_spec()]}}.
 init([]) ->
     JobsSup = {s3filez_jobs_sup, {s3filez_jobs_sup, start_link, []},
                      permanent, 2000, supervisor, [s3filez_jobs_sup]},
     Children = [JobsSup],
     RestartStrategy = {one_for_one, 4, 3600},
     {ok, {RestartStrategy, Children}}.
-
