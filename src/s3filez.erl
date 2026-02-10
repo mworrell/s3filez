@@ -433,7 +433,7 @@ canonicalize_amz_headers(Headers) ->
 ct(Headers) ->
     list_to_binary(proplists:get_value("content-type", Headers, "binary/octet-stream")).
 
--spec checksum(file:filename()) -> binary().
+-spec checksum(file:filename_all()) -> binary().
 checksum(Filename) ->
     Ctx = crypto:hash_init(md5),
     {ok, FD} = file:open(Filename, [read,binary]),
