@@ -127,6 +127,43 @@ e2e_get_invalid_credentials_v2_test() ->
             end
     end.
 
+multipart_test_() ->
+    [{atom_to_list(Version), fun() -> multipart(Version) end} || Version <- [v2, v4]].
+
+multipart(Version) ->
+    {ok, _} = application:ensure_all_started(s3filez),
+    {Pid, Port} = start_server(),
+    true = is_pid(Pid),
+    try
+        Cfg = #{username => <<"test-access">>, password => <<"test-secret">>,
+                signature_version => Version, region => <<"us-east-1">>},
+        Url = iolist_to_binary(["http://127.0.0.1:", integer_to_list(Port), "/multipart"]),
+        {ok, Id} = s3filez:create_multipart_upload(Cfg, Url, [{content_type, "text/plain"}]),
+        ?assertEqual(<<"id+/=&">>, Id),
+        {ok, ETag} = s3filez:upload_part(Cfg, Url, Id, 1, {data, <<"hello">>}),
+        ?assertEqual(<<"\"part-etag\"">>, ETag),
+        Filename = filename:join("/tmp", "s3filez-part-" ++ integer_to_list(erlang:unique_integer([positive]))),
+        ok = file:write_file(Filename, <<"hello">>),
+        try
+            ?assertEqual({ok, ETag}, s3filez:upload_part(Cfg, Url, Id, 1, {filename, Filename}))
+        after
+            file:delete(Filename)
+        end,
+        ?assertEqual({ok, <<"\"object-etag\"">>},
+                     s3filez:complete_multipart_upload(Cfg, Url, Id, [{1, ETag}])),
+        ?assertEqual({error, {s3, <<"InvalidPart">>, <<"Missing part">>}},
+                     s3filez:complete_multipart_upload(Cfg, Url, Id, [{2, ETag}])),
+        ?assertEqual(ok, s3filez:abort_multipart_upload(Cfg, Url, Id)),
+        ?assertEqual({error, forbidden}, s3filez:create_multipart_upload(
+            Cfg#{username => <<"wrong">>}, Url)),
+        ?assertEqual({error, invalid_part_number},
+                     s3filez:upload_part(Cfg, Url, Id, 0, {data, <<>>})),
+        ?assertEqual({error, invalid_parts},
+                     s3filez:complete_multipart_upload(Cfg, Url, Id, []))
+    after
+        stop_server(Pid)
+    end.
+
 start_server() ->
     case gen_tcp:listen(0, [binary, {packet, raw}, {active, false}, {reuseaddr, true}]) of
         {ok, LSock} ->
@@ -251,12 +288,44 @@ recv_body(Sock, Rest, Len) ->
 handle_request(Sock, Table, Method, Path, Query, Headers, Body) ->
     case validate_signature(Method, Path, Query, Headers, Body) of
         ok ->
-            handle_request_ok(Sock, Table, Method, Path, Body);
+            handle_multipart(Sock, Table, Method, Path, Query, Headers, Body);
         {error, forbidden} ->
             send_response(Sock, 403, <<"Forbidden">>, <<>>);
         {error, bad_request} ->
             send_response(Sock, 400, <<"Bad Request">>, <<>>)
     end.
+
+handle_multipart(Sock, _Table, "POST", <<"/multipart">>, <<"uploads">>, Headers, _Body) ->
+    ?assertEqual({ok, <<"text/plain">>}, header_value("content-type", Headers)),
+    send_response(Sock, 200, <<"OK">>,
+        <<"<InitiateMultipartUploadResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">",
+          "<UploadId>id+/=&amp;</UploadId></InitiateMultipartUploadResult>">>);
+handle_multipart(Sock, Table, "PUT", <<"/multipart">>,
+                 <<"partNumber=1&uploadId=id%2B%2F%3D%26">>, Headers, Body) ->
+    ?assertEqual(<<"hello">>, Body),
+    ?assertEqual({ok, base64:encode(crypto:hash(md5, Body))}, header_value("content-md5", Headers)),
+    ets:insert(Table, {part, Body}),
+    gen_tcp:send(Sock, <<"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n",
+                         "ETag: \"part-etag\"\r\nConnection: close\r\n\r\n">>);
+handle_multipart(Sock, Table, "POST", <<"/multipart">>,
+                 <<"uploadId=id%2B%2F%3D%26">>, _Headers, Body) ->
+    ?assertEqual([{part, <<"hello">>}], ets:lookup(Table, part)),
+    Expected = <<"<CompleteMultipartUpload><Part><PartNumber>1</PartNumber>",
+                 "<ETag>&quot;part-etag&quot;</ETag></Part></CompleteMultipartUpload>">>,
+    Response = case Body of
+        Expected -> <<"<CompleteMultipartUploadResult><ETag>&quot;object-etag&quot;</ETag>",
+                      "</CompleteMultipartUploadResult>">>;
+        _ -> <<" \n<Error><Code>InvalidPart</Code><Message>Missing part</Message></Error>">>
+    end,
+    send_response(Sock, 200, <<"OK">>, Response);
+handle_multipart(Sock, Table, "DELETE", <<"/multipart">>,
+                 <<"uploadId=id%2B%2F%3D%26">>, _Headers, _Body) ->
+    ets:delete(Table, part),
+    send_response(Sock, 204, <<"No Content">>, <<>>);
+handle_multipart(Sock, _Table, _Method, <<"/multipart">>, _Query, _Headers, _Body) ->
+    send_response(Sock, 400, <<"Bad Request">>, <<>>);
+handle_multipart(Sock, Table, Method, Path, _Query, _Headers, Body) ->
+    handle_request_ok(Sock, Table, Method, Path, Body).
 
 handle_request_ok(Sock, Table, "PUT", Path, Body) ->
     ets:insert(Table, {Path, Body}),
@@ -281,7 +350,7 @@ validate_signature(Method, Path, Query, Headers, Body) ->
                 <<"AWS4-HMAC-SHA256 ", _/binary>> ->
                     validate_sigv4(Method, Path, Query, Headers, Body, Auth);
                 <<"AWS ", _/binary>> ->
-                    validate_sigv2(Method, Path, Headers, Body, Auth);
+                    validate_sigv2(Method, Path, Query, Headers, Body, Auth);
                 _ ->
                     {error, bad_request}
             end;
@@ -289,7 +358,7 @@ validate_signature(Method, Path, Query, Headers, Body) ->
             {error, bad_request}
     end.
 
-validate_sigv2(Method, Path, Headers, _Body, Auth) ->
+validate_sigv2(Method, Path, Query, Headers, _Body, Auth) ->
     case parse_sigv2_auth(Auth) of
         {ok, Access, Signature} when Access =:= <<"test-access">> ->
             Date = header_value_or("date", Headers, <<>>),
@@ -303,7 +372,8 @@ validate_sigv2(Method, Path, Headers, _Body, Auth) ->
                 Date,
                 normalize_headers(Headers),
                 <<"127.0.0.1">>,
-                Path
+                Path,
+                Query
             ),
             case Signature =:= Sig of
                 true -> ok;

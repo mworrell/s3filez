@@ -83,8 +83,8 @@ canonical_query_string(Query) ->
     Parts = binary:split(Query, <<"&">>, [global]),
     Pairs = [
         case binary:split(P, <<"=">>) of
-            [K, V] -> {uri_encode(K), uri_encode(V)};
-            [K] -> {uri_encode(K), <<>>}
+            [K, V] -> {uri_encode(uri_string:percent_decode(K)), uri_encode(uri_string:percent_decode(V))};
+            [K] -> {uri_encode(uri_string:percent_decode(K)), <<>>}
         end
         || P <- Parts, P =/= <<>>
     ],
@@ -223,6 +223,7 @@ checksum_sha256_1(Ctx, FD) ->
 to_list(B) when is_binary(B) -> binary_to_list(B);
 to_list(L) when is_list(L) -> L.
 
+method_string('post') -> "POST";
 method_string('put') -> "PUT";
 method_string('get') -> "GET";
 method_string('delete') -> "DELETE".

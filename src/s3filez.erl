@@ -43,6 +43,12 @@
     put/4,
     stream/3,
 
+    create_multipart_upload/2,
+    create_multipart_upload/3,
+    upload_part/5,
+    complete_multipart_upload/4,
+    abort_multipart_upload/3,
+
     create_bucket/2,
     create_bucket/3
     ]).
@@ -183,25 +189,28 @@ put(Config, Url, Payload) ->
 
 %% @doc Put a binary or file to the given url. Set options for acl and/or content_type.
 -spec put( config(), url(), put_data(), put_opts() ) -> sync_reply().
-put(Config, Url, {data, Data}, Opts) ->
+put(Config, Url, Payload, Opts) ->
+    ret_status(put_request(Config, Url, Payload, Opts)).
+
+put_request(Config, Url, {data, Data}, Opts) ->
     Ctx1 = crypto:hash_update(crypto:hash_init(md5), Data),
     Hash = base64:encode(crypto:hash_final(Ctx1)),
     Hs = [
           {"Content-MD5", binary_to_list(Hash)}
           | opts_to_headers(Opts)
     ],
-    ret_status(request_with_body(Config, put, Url, Hs, Data));
-put(Config, Url, {filename, Filename}, Opts) ->
+    request_with_body(Config, put, Url, Hs, Data);
+put_request(Config, Url, {filename, Filename}, Opts) ->
     Size = filelib:file_size(Filename),
-    put(Config, Url, {filename, Size, Filename}, Opts);
-put(Config, Url, {filename, Size, Filename}, Opts) ->
+    put_request(Config, Url, {filename, Size, Filename}, Opts);
+put_request(Config, Url, {filename, Size, Filename}, Opts) ->
     Hash = base64:encode(checksum(Filename)),
     Hs = [
           {"Content-MD5", binary_to_list(Hash)},
           {"Content-Length", integer_to_list(Size)}
           | opts_to_headers(Opts)
     ],
-    ret_status(request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}})).
+    request_with_body(Config, put, Url, Hs, {fun ?MODULE:put_body_file/1, {file, Filename}}).
 
 -spec put_body_file({file, file:filename_all()} | {fd, file:io_device()}) ->
     eof | {ok, binary(), {fd, file:io_device()}}.
@@ -216,6 +225,87 @@ put_body_file({fd, FD}) ->
         {ok, Data} ->
             {ok, Data, {fd, FD}}
     end.
+
+%% @doc Initiate a multipart upload. Keep the returned upload ID until completion or abort.
+-spec create_multipart_upload(config(), url()) -> {ok, binary()} | {error, term()}.
+create_multipart_upload(Config, Url) ->
+    create_multipart_upload(Config, Url, []).
+
+%% @doc Set the object ACL and content type when initiating the upload.
+-spec create_multipart_upload(config(), url(), put_opts()) -> {ok, binary()} | {error, term()}.
+create_multipart_upload(Config, Url, Opts) ->
+    Result = multipart_post(Config, multipart_url(Url, <<"uploads">>), <<>>, Opts),
+    multipart_result(Result, "InitiateMultipartUploadResult", "UploadId").
+
+%% @doc Upload a numbered part. Returns the ETag to pass to complete_multipart_upload/4.
+%% Parts may be retried with the same number. Except for the final part, S3 requires
+%% at least 5 MiB per part. The payload has the same format as put/3.
+-spec upload_part(config(), url(), binary(), 1..10000, put_data()) ->
+    {ok, binary()} | {error, term()}.
+upload_part(Config, Url, UploadId, PartNumber, Payload)
+        when is_integer(PartNumber), PartNumber >= 1, PartNumber =< 10000 ->
+    Query = iolist_to_binary([
+        "partNumber=", integer_to_binary(PartNumber), "&", upload_query(UploadId)
+    ]),
+    case put_request(Config, multipart_url(Url, Query), Payload, []) of
+        {ok, {{_, 200, _}, Headers, _}} ->
+            case proplists:get_value("etag", Headers) of
+                undefined -> {error, invalid_multipart_response};
+                [] -> {error, invalid_multipart_response};
+                ETag -> {ok, iolist_to_binary(ETag)}
+            end;
+        Other -> multipart_error(Other)
+    end;
+upload_part(_Config, _Url, _UploadId, _PartNumber, _Payload) ->
+    {error, invalid_part_number}.
+
+%% @doc Complete an upload with {PartNumber, ETag} pairs. Parts are sorted by number;
+%% duplicate or invalid numbers are rejected. A failed completion can be retried or aborted.
+-spec complete_multipart_upload(config(), url(), binary(), [{1..10000, binary()}]) ->
+    {ok, binary()} | {error, term()}.
+complete_multipart_upload(Config, Url, UploadId, Parts) ->
+    case s3filez_multipart:completion_body(Parts) of
+        {ok, Body} ->
+            Result = multipart_post(Config, multipart_url(Url, upload_query(UploadId)),
+                                    Body, [{content_type, "application/xml"}]),
+            multipart_result(Result, "CompleteMultipartUploadResult", "ETag");
+        {error, _} = Error -> Error
+    end.
+
+%% @doc Abort an unfinished upload and release its stored parts.
+-spec abort_multipart_upload(config(), url(), binary()) -> sync_reply().
+abort_multipart_upload(Config, Url, UploadId) ->
+    delete(Config, multipart_url(Url, upload_query(UploadId))).
+
+multipart_post(Config, Url, Body, Opts) ->
+    Headers = [{"Content-MD5", binary_to_list(base64:encode(crypto:hash(md5, Body)))}
+               | opts_to_headers(Opts)],
+    request_with_body(Config, post, Url, Headers, Body).
+
+multipart_result({ok, {{_, 200, _}, _, Body}}, Root, Field) ->
+    %% Completion can report an XML Error even with HTTP 200.
+    s3filez_multipart:response(Body, Root, Field);
+multipart_result(Other, _Root, _Field) ->
+    multipart_error(Other).
+
+multipart_error(Result) ->
+    case ret_status(Result) of
+        ok -> {error, invalid_multipart_response};
+        {error, _} = Error -> Error
+    end.
+
+upload_query(UploadId) ->
+    <<"uploadId=", (z_url:percent_encode(UploadId))/binary>>.
+
+multipart_url(Url, Query) ->
+    Parts = uri_string:parse(Url),
+    Existing = maps:get(query, Parts, <<>>),
+    Combined = case Existing of
+        <<>> -> Query;
+        _ -> <<Existing/binary, "&", Query/binary>>
+    end,
+    uri_string:recompose(maps:remove(fragment, Parts#{query => Combined})).
+
 
 %% @doc Create a private bucket at the URL.
 -spec create_bucket( config(), url() ) -> sync_reply().
@@ -357,7 +447,7 @@ request(#{ username := Key } = Config, Method, Url, Headers, Options) ->
             request_v4(Config, Method, Url, Host, Path, Query, Headers, Options);
         v2 ->
             Date = httpd_util:rfc1123_date(),
-            Signature = s3filez_sigv2:sign(Config, Method, "", "", Date, Headers, Host, Path),
+            Signature = s3filez_sigv2:sign(Config, Method, "", "", Date, Headers, Host, Path, Query),
             AllHeaders = [
                 {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date} | Headers
@@ -376,7 +466,7 @@ request_with_body(#{ username := Key } = Config, Method, Url, Headers, Body) ->
             {"Content-Type", ContentType} = proplists:lookup("Content-Type", Headers),
             {"Content-MD5", ContentMD5} = proplists:lookup("Content-MD5", Headers),
             Date = httpd_util:rfc1123_date(),
-            Signature = s3filez_sigv2:sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path),
+            Signature = s3filez_sigv2:sign(Config, Method, ContentMD5, ContentType, Date, Headers, Host, Path, Query),
             Hs1 = [
                 {"Authorization", lists:flatten(["AWS ",to_list(Key),":",binary_to_list(Signature)])},
                 {"Date", Date}

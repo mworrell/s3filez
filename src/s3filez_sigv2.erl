@@ -23,7 +23,8 @@
 -module(s3filez_sigv2).
 
 -export([
-    sign/8
+    sign/8,
+    sign/9
 ]).
 
 -spec sign(
@@ -36,7 +37,12 @@
     binary(),
     binary()
 ) -> binary().
-sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
+sign(Config, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
+    sign(Config, Method, BodyMD5, ContentType, Date, Headers, Host, Path, <<>>).
+
+%% @doc Include multipart subresources literally as sent in the request URI.
+-spec sign(map(), atom(), iodata(), iodata(), iodata(), list(), binary(), binary(), binary()) -> binary().
+sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path, Query) ->
     Split = binary:split(Host, <<".">>, [global]),
     ResourcePrefix =
         case lists:reverse(Split) of
@@ -51,10 +57,20 @@ sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host,
             ContentType, $\n,
             Date, $\n,
             canonicalize_amz_headers(Headers),
-            iolist_to_binary([ResourcePrefix, Path])
+            iolist_to_binary([ResourcePrefix, Path, multipart_query(Query)])
            ],
     base64:encode(crypto:mac(hmac, sha, Secret, Data)).
 
+multipart_query(Query) ->
+    Parts = [P || P <- binary:split(Query, <<"&">>, [global]),
+                  lists:member(hd(binary:split(P, <<"=">>)),
+                               [<<"uploads">>, <<"uploadId">>, <<"partNumber">>])],
+    case lists:sort(Parts) of
+        [] -> <<>>;
+        Sorted -> ["?", lists:join("&", Sorted)]
+    end.
+
+method_string('post') -> "POST";
 method_string('put') -> "PUT";
 method_string('get') -> "GET";
 method_string('delete') -> "DELETE".
