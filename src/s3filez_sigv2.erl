@@ -37,8 +37,9 @@
     binary()
 ) -> binary().
 sign(#{ password := Secret }, Method, BodyMD5, ContentType, Date, Headers, Host, Path) ->
+    Split = binary:split(Host, <<".">>, [global]),
     ResourcePrefix =
-        case lists:reverse(Split=binary:split(Host, <<".">>, [global])) of
+        case lists:reverse(Split) of
             [<<"com">>, <<"amazonaws">> | _] ->
                 ["/", hd(Split)];
             _ ->
