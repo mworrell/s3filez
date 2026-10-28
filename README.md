@@ -5,13 +5,13 @@
 s3filez
 =======
 
-Really tiny S3 client - only put, get and delete.
+Really tiny S3 client - put, get, delete and multipart uploads.
 
 This client is used in combination with filezcache and zotonic.
 
 Distinction with other s3 clients is:
 
- * Only get, put and delete are supported
+ * get, put, delete and multipart uploads
  * put of files and/or binaries
  * get with optional streaming function, to be able to stream to the filezcache
  * simple jobs queue, using the 'jobs' scheduler
@@ -61,6 +61,45 @@ Signature V4 example
 
 Signature V2 is the default if `signature_version` is not set.
 When using Signature V4, `region` must be set; otherwise calls return `{error, region_needed}`.
+
+Multipart uploads
+-----------------
+
+Use multipart uploads when data arrives in chunks or its final size is unknown.
+The API works with the same configuration and object URL as `put/3`, using either
+Signature V2 or V4. Initiation accepts the same ACL and content type options as `put/4`.
+
+```erlang
+{ok, UploadId} = s3filez:create_multipart_upload(Cfg, Url,
+    [{content_type, "application/octet-stream"}]),
+{ok, ETag1} = s3filez:upload_part(Cfg, Url, UploadId, 1, {data, FirstPart}),
+{ok, ETag2} = s3filez:upload_part(Cfg, Url, UploadId, 2, {data, LastPart}),
+{ok, ObjectETag} = s3filez:complete_multipart_upload(Cfg, Url, UploadId,
+    [{1, ETag1}, {2, ETag2}]).
+```
+
+`upload_part/5` also accepts `{filename, Filename}` or
+`{filename, Size, Filename}`, where the file contains that part's data.
+Each call blocks until its request finishes and uses the existing job limiter.
+The caller controls buffering, concurrency and retries; no whole-object buffering
+or total size is required. Accumulate incoming chunks into parts of at least
+5 MiB, except for the final part, which may be smaller. Part numbers are 1–10,000.
+Retrying a part with the same number replaces it; retain its latest returned ETag.
+Completion sorts the supplied parts and rejects duplicate or invalid numbers.
+
+If abandoning an upload, release its stored parts with:
+
+```erlang
+ok = s3filez:abort_multipart_upload(Cfg, Url, UploadId).
+```
+
+Completion returns `{ok, ObjectETag}` only after parsing the success response.
+An S3 error embedded in HTTP 200 returns `{error, {s3, Code, Message}}`, with binary
+code and message. Malformed success responses return
+`{error, invalid_multipart_response}`. Other HTTP and transport errors follow the
+existing API conventions. Failed calls do not automatically abort the upload,
+so the caller can retry or explicitly abort it. Persist the upload ID if cleanup
+must survive a caller restart.
 
 Request Queue
 -------------
